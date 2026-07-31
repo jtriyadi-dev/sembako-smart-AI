@@ -131,19 +131,10 @@ export const LicenseActivationGate: React.FC<LicenseActivationGateProps> = ({
         {/* Form */}
         <form onSubmit={handleActivate} className="space-y-4">
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span>Kode License Key (16 Karakter Wajib)</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setInputKey('04RM-X06K-FSW0-CSBW')}
-                className="text-[10px] text-amber-400 hover:text-amber-300 font-mono font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
-              >
-                Gunakan Key Resmi: 04RM-X06K-FSW0-CSBW
-              </button>
-            </div>
+            <label className="text-xs font-bold text-slate-300 flex items-center gap-2">
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              <span>Kode License Key (16 Karakter Wajib)</span>
+            </label>
             <div className="relative">
               <input
                 type="text"
