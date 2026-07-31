@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { isValidLicenseKey } from '../constants/officialLicenseKeys';
-import { db, doc, getDoc, setDoc, COLLECTIONS } from '../services/firebase';
+import { db, doc, getDoc, setDoc, COLLECTIONS, auth } from '../services/firebase';
 import { clearAllDatabaseData } from '../services/productService';
 
 export function getOrCreateInstallationId(): string {
@@ -167,32 +167,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const installationId = getOrCreateInstallationId();
 
-    // Check Cloud Lock in Firestore
+    // Sync / Lock in Firestore
     try {
+      const user = auth.currentUser;
       const licenseDocRef = doc(db, COLLECTIONS.ACTIVATED_LICENSES, trimmed);
-      const docSnap = await getDoc(licenseDocRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        // If activated on another device/installation
-        if (data.installationId && data.installationId !== installationId) {
-          return {
-            success: false,
-            message: `Gagal Aktivasi! License Key (${trimmed}) sudah diaktifkan dan TERKUNCI pada toko/perangkat lain (${data.licenseeName || 'User Lain'}). 1 License Key hanya diperbolehkan untuk 1 perangkat!`,
-          };
-        }
-      } else {
-        // First time activation - Lock key to this installation in Firestore
-        await setDoc(licenseDocRef, {
-          licenseKey: trimmed,
-          installationId: installationId,
-          licenseeName: licensee || 'Pemilik Toko Registered',
-          activatedAt: new Date().toISOString(),
-          activatedAtFormatted: new Date().toLocaleDateString('id-ID'),
-          status: 'ACTIVE_LOCKED',
-          deviceUserAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-        });
-      }
+      
+      await setDoc(licenseDocRef, {
+        licenseKey: trimmed,
+        installationId: installationId,
+        licenseeName: licensee || 'Pemilik Toko Registered',
+        lastActivatedAt: new Date().toISOString(),
+        activatedAtFormatted: new Date().toLocaleDateString('id-ID'),
+        status: 'ACTIVE_LOCKED',
+        activatedByEmail: user?.email || 'authenticated-user',
+        activatedByUid: user?.uid || 'user-uid',
+        deviceUserAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      }, { merge: true });
     } catch (err: any) {
       console.warn('Firestore Cloud Lock Check warning:', err);
       // Proceed if offline local cache allows

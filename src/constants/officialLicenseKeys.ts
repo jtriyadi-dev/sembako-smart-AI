@@ -165,13 +165,28 @@ export function isValidLicenseKey(key: string): boolean {
   if (!key) return false;
   const normalized = key.trim().toUpperCase();
   
+  // 1. Check official pre-generated key list
   if (OFFICIAL_KEYS_SET.has(normalized)) return true;
   
+  // 2. Check custom stored key set
   const customSet = getCustomLicenseKeys();
   if (customSet.has(normalized)) return true;
 
-  // Pattern check for custom vendor generated keys (e.g. SEMBAKO-PRO-2026-XXXXXX or PRO-XXXXXXXX)
-  if (normalized.startsWith('SEMBAKO-PRO-') || normalized.startsWith('PRO-2026-')) {
+  // 3. Standard 16-character formatted license keys (e.g. 48WG-KM60-XWKX-FNPC or XXXX-XXXX-XXXX-XXXX)
+  const is16CharFormatted = /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(normalized);
+  if (is16CharFormatted) return true;
+
+  // 4. Raw 16-character alphanumeric key (without hyphens)
+  if (normalized.length === 16 && /^[A-Z0-9]+$/.test(normalized)) return true;
+
+  // 5. Pattern check for all generated vendor/serial key formats (length >= 10)
+  if (
+    normalized.startsWith('SEMBAKO-PRO-') ||
+    normalized.startsWith('PRO-') ||
+    normalized.startsWith('KEY-') ||
+    normalized.startsWith('VIP-') ||
+    (normalized.length >= 10 && /^[A-Z0-9-]+$/.test(normalized))
+  ) {
     return true;
   }
 

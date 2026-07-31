@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useStore } from '../context/StoreContext';
 import { useToast } from '../context/ToastContext';
 import { PageId } from '../types';
-import { Store, Sparkles, Mail, Lock, LogIn, ArrowRight, ShieldCheck, CheckCircle2, Globe } from 'lucide-react';
+import { Store, Sparkles, Mail, Lock, LogIn, ArrowRight, ShieldCheck, CheckCircle2, Globe, AlertCircle } from 'lucide-react';
 
 interface LoginPageProps {
   onNavigate: (page: PageId) => void;
@@ -18,6 +18,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const handlePostAuthNavigate = () => {
     if (!licenseInfo.isActivated && !isDemoSession) {
@@ -29,6 +30,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
     if (!email || !password) {
       error('Input Kurang', 'Masukkan email dan kata sandi Anda.');
       return;
@@ -45,7 +47,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
       }
       handlePostAuthNavigate();
     } catch (err: any) {
-      error('Gagal Autentikasi', err.message || 'Terjadi kesalahan saat masuk.');
+      console.error('Email Auth Error:', err);
+      let msg = err.message || 'Terjadi kesalahan saat autentikasi.';
+      if (err.code === 'auth/email-already-in-use') {
+        msg = 'Email ini sudah terdaftar. Silakan pilih opsi Masuk di bawah.';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Kata sandi terlalu pendek. Gunakan minimal 6 karakter.';
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        msg = 'Email atau kata sandi tidak cocok. Bila belum buat akun, silakan klik Daftar.';
+      }
+      setAuthError(msg);
+      error('Gagal Autentikasi', msg);
     } finally {
       setSubmitting(false);
     }
@@ -53,12 +65,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
   const handleGoogleLogin = async () => {
     setSubmitting(true);
+    setAuthError(null);
     try {
       await loginGoogle();
       success('Login Google', 'Berhasil masuk dengan akun Google.');
       handlePostAuthNavigate();
     } catch (err: any) {
-      info('Login Demo Disediakan', 'Anda dapat menggunakan opsi Masuk Mode Demo untuk uji coba cepat.');
+      console.error('Google Login Error:', err);
+      let msg = err?.message || 'Gagal masuk dengan akun Google.';
+      if (err?.code === 'auth/unauthorized-domain') {
+        msg = 'Domain ini (sembako-smart-ai.vercel.app) belum diizinkan di Firebase Console. Buka Firebase Console > Authentication > Settings > Authorized Domains > Tambahkan domain sembako-smart-ai.vercel.app. Atau gunakan Masuk Mode Demo di bawah.';
+      } else if (err?.code === 'auth/popup-blocked') {
+        msg = 'Pop-up Google diblokir oleh browser. Harap izinkan pop-up pada browser Anda.';
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        msg = 'Jendela login Google ditutup sebelum selesai.';
+      }
+      setAuthError(msg);
+      error('Gagal Google Login', msg);
     } finally {
       setSubmitting(false);
     }
@@ -102,6 +125,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               Kelola stok, kasir, dan analisis AI dalam satu platform terpadu.
             </p>
           </div>
+
+          {/* Error Banner */}
+          {authError && (
+            <div className="mb-4 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs flex items-start gap-2 font-medium">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span>{authError}</span>
+                {authError.includes('sembako-smart-ai.vercel.app') && (
+                  <p className="text-[11px] text-amber-500 font-bold underline cursor-pointer pt-1" onClick={handleDemoAccess}>
+                    👉 Klik di sini untuk masuk Mode Demo 6 Jam secara instant.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

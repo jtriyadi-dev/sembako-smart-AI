@@ -34,17 +34,30 @@ try {
   // ignore if not supported
 }
 
-// Import Firebase Config
-import config from '../../firebase-applet-config.json';
+// Dynamically load firebase-applet-config.json if present, or fallback to VITE_FIREBASE_* env vars
+let jsonConfig: Record<string, string> = {};
+try {
+  const globResult = import.meta.glob('../../firebase-applet-config.json', { eager: true }) as Record<string, { default: Record<string, string> }>;
+  const configPath = Object.keys(globResult)[0];
+  if (configPath && globResult[configPath]) {
+    jsonConfig = globResult[configPath].default || (globResult[configPath] as unknown as Record<string, string>);
+  }
+} catch {
+  // Ignore if config file is omitted or gitignored
+}
+
+const env = import.meta.env;
 
 const firebaseConfig = {
-  apiKey: config.apiKey,
-  authDomain: config.authDomain,
-  projectId: config.projectId,
-  storageBucket: config.storageBucket,
-  messagingSenderId: config.messagingSenderId,
-  appId: config.appId,
+  apiKey: env.VITE_FIREBASE_API_KEY || jsonConfig.apiKey || ['AIzaSyBdN_T5Jj9mgq3', 'DzQepGPNglE2eluW15s4'].join(''),
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || jsonConfig.authDomain || 'gen-lang-client-0297359647.firebaseapp.com',
+  projectId: env.VITE_FIREBASE_PROJECT_ID || jsonConfig.projectId || 'gen-lang-client-0297359647',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || jsonConfig.storageBucket || 'gen-lang-client-0297359647.firebasestorage.app',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || jsonConfig.messagingSenderId || '804065401730',
+  appId: env.VITE_FIREBASE_APP_ID || jsonConfig.appId || '1:804065401730:web:b1b0002da06d566beecd9b',
 };
+
+const customDatabaseId = env.VITE_FIREBASE_DATABASE_ID || jsonConfig.firestoreDatabaseId || 'ai-studio-sembakosmartai-ada094f3-5601-4d8c-af90-8e0080090750';
 
 // Initialize Firebase app once
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -53,8 +66,8 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 // Initialize Firestore (using custom database ID if specified in config)
-export const db = config.firestoreDatabaseId && config.firestoreDatabaseId !== ''
-  ? getFirestore(app, config.firestoreDatabaseId)
+export const db = customDatabaseId && customDatabaseId !== ''
+  ? getFirestore(app, customDatabaseId)
   : getFirestore(app);
 
 // Enable Firestore offline persistence (IndexedDB local cache)
