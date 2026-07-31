@@ -1,0 +1,6 @@
+{
+  "name": "Sembako Smart AI",
+  "description": "Aplikasi pengelola toko sembako modern dengan manajemen stok, kasir, laporan, dan AI Assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

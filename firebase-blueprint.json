@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product item in Sembako Smart AI store",
+      "type": "object",
+      "properties": {
+        "kode": { "type": "string" },
+        "barcode": { "type": "string" },
+        "nama": { "type": "string" },
+        "kategori": { "type": "string" },
+        "hargaBeli": { "type": "number" },
+        "hargaJual": { "type": "number" },
+        "stok": { "type": "number" },
+        "minStok": { "type": "number" },
+        "satuan": { "type": "string" },
+        "gambarUrl": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "expiredDate": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "supplierNama": { "type": "string" },
+        "terjual": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["kode", "nama", "kategori", "hargaBeli", "hargaJual", "stok", "satuan"]
+    },
+    "StockMovement": {
+      "title": "Stock Movement",
+      "description": "Log of stock movements (in, out, adjustment, opname)",
+      "type": "object",
+      "properties": {
+        "produkId": { "type": "string" },
+        "namaProduk": { "type": "string" },
+        "kodeProduk": { "type": "string" },
+        "tipe": { "type": "string", "enum": ["masuk", "keluar", "penyesuaian", "opname"] },
+        "jumlah": { "type": "number" },
+        "stokAwal": { "type": "number" },
+        "stokAkhir": { "type": "number" },
+        "keterangan": { "type": "string" },
+        "supplier": { "type": "string" },
+        "expiredDate": { "type": "string" },
+        "batchNo": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "operator": { "type": "string" }
+      },
+      "required": ["produkId", "namaProduk", "kodeProduk", "tipe", "jumlah", "stokAwal", "stokAkhir", "createdAt"]
+    },
+    "StockOpname": {
+      "title": "Stock Opname",
+      "description": "Physical stock audit record",
+      "type": "object",
+      "properties": {
+        "tanggal": { "type": "string" },
+        "produkId": { "type": "string" },
+        "namaProduk": { "type": "string" },
+        "kodeProduk": { "type": "string" },
+        "stokSistem": { "type": "number" },
+        "stokFisik": { "type": "number" },
+        "selisih": { "type": "number" },
+        "alasan": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["tanggal", "produkId", "stokSistem", "stokFisik", "selisih", "createdAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Data supplier distributor barang sembako",
+      "type": "object",
+      "properties": {
+        "kodeSupplier": { "type": "string" },
+        "namaSupplier": { "type": "string" },
+        "kontakPerson": { "type": "string" },
+        "telepon": { "type": "string" },
+        "email": { "type": "string" },
+        "alamat": { "type": "string" },
+        "kategoriProduk": { "type": "string" },
+        "catatan": { "type": "string" },
+        "status": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["kodeSupplier", "namaSupplier", "telepon", "status"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Store products collection"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Store suppliers collection"
+    },
+    "/stock_movements/{movementId}": {
+      "schema": "StockMovement",
+      "description": "Log of all stock movements"
+    },
+    "/stock_opnames/{opnameId}": {
+      "schema": "StockOpname",
+      "description": "Stock audit records"
+    }
+  }
+}
