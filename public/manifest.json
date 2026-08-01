@@ -1,21 +1,50 @@
 {
+  "id": "/",
   "short_name": "SembakoAI",
-  "name": "Sembako Smart AI",
+  "name": "Sembako Smart AI - Kasir & Toko",
+  "description": "Aplikasi Pengelola Toko Sembako Modern Berbasis AI, Kasir POS & Stok Offline-First",
   "icons": [
     {
-      "src": "pwa-192x192.png",
-      "type": "image/png",
-      "sizes": "192x192"
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
     },
     {
-      "src": "pwa-512x512.png",
-      "type": "image/png",
-      "sizes": "512x512"
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#061a14",
   "theme_color": "#047857",
-  "display": "standalone",
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "categories": ["business", "shopping", "productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Kasir POS",
+      "short_name": "Kasir",
+      "description": "Buka Mode Kasir POS Langsung",
+      "url": "/?page=kasir",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Buka Dashboard Ringkasan Toko",
+      "url": "/?page=dashboard",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    }
+  ]
 }

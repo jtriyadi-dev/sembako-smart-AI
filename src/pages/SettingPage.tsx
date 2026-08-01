@@ -2542,14 +2542,38 @@ export const SettingPage: React.FC = () => {
 
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
               <h4 className="font-bold text-slate-800 dark:text-slate-200 uppercase text-[10px]">
-                Status Komponen
+                Status Komponen & Mode PWA
               </h4>
               <ul className="space-y-1.5 font-bold">
                 <li className="text-emerald-600 dark:text-emerald-400">✓ Sync Firestore OK</li>
-                <li className="text-emerald-600 dark:text-emerald-400">✓ PWA Service Worker Ready</li>
-                <li className="text-emerald-600 dark:text-emerald-400">✓ Offline Local Storage Engine Active</li>
+                <li className="text-emerald-600 dark:text-emerald-400">✓ Progressive Web App (PWA Mode) Active</li>
+                <li className="text-emerald-600 dark:text-emerald-400">✓ Offline Service Worker & Cache Ready</li>
               </ul>
             </div>
+          </div>
+
+          {/* PWA Mode Info Box */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900 border border-emerald-500/30 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+                <Smartphone className="w-4 h-4" />
+                <span>Mode Aplikasi PWA Terkonfigurasi</span>
+              </div>
+              <p className="text-xs text-slate-300">
+                Sembako Smart AI siap diinstall secara native di Android, iOS, Windows, maupun Mac OS tanpa perlu download dari Play Store.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                const dismissed = localStorage.getItem('sembako_pwa_dismissed');
+                localStorage.removeItem('sembako_pwa_dismissed');
+                window.location.reload();
+              }}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shrink-0 flex items-center gap-1.5 shadow-lg cursor-pointer transition-transform active:scale-95"
+            >
+              <Download className="w-4 h-4 stroke-[2.5]" />
+              <span>Tampilkan Banner Install PWA</span>
+            </button>
           </div>
         </motion.div>
       )}

@@ -16,6 +16,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingModal } from './components/OnboardingModal';
 import { DocumentationModal } from './components/DocumentationModal';
 import { LicenseActivationGate } from './components/LicenseActivationGate';
+import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { useStore } from './context/StoreContext';
 
 // Pages
@@ -166,6 +167,9 @@ const MainAppContent: React.FC = () => {
 
       {/* Native Mobile Bottom Navigation */}
       <BottomNavMobile currentPage={currentPage} onNavigate={setCurrentPage} />
+
+      {/* PWA Install Prompt Banner */}
+      <PwaInstallPrompt />
     </div>
   );
 };
