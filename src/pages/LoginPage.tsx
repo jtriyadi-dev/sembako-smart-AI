@@ -105,6 +105,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
         {/* Card Box */}
         <div className="relative bg-white/80 dark:bg-slate-900/80 backdrop-blur-2xl border border-emerald-500/20 rounded-3xl p-8 shadow-2xl">
           
+          {/* Back to Landing Page Header Link */}
+          <div className="flex items-center justify-between mb-6">
+            <button
+              onClick={() => onNavigate('landing')}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
+            >
+              <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+              <span>Kembali ke Beranda</span>
+            </button>
+            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+              v2.5 PRO
+            </span>
+          </div>
+
           {/* Top Logo */}
           <div className="flex flex-col items-center text-center mb-8">
             <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-700 via-emerald-600 to-amber-500 p-0.5 shadow-xl shadow-emerald-900/30 mb-4">

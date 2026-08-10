@@ -40,7 +40,12 @@ import {
   AlertTriangle,
   PackageCheck,
   Layers,
-  Sparkle
+  Sparkle,
+  Upload,
+  Save,
+  RotateCcw,
+  ImagePlus,
+  UploadCloud
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -50,6 +55,55 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
   const { demoLogin } = useAuth();
   const { success } = useToast();
+
+  // Custom Banner Image State
+  const DEFAULT_BANNER = 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?q=80&w=1600&auto=format&fit=crop';
+  const [savedBannerImage, setSavedBannerImage] = useState<string>(() => {
+    return localStorage.getItem('custom_landing_banner') || DEFAULT_BANNER;
+  });
+  const [previewBannerImage, setPreviewBannerImage] = useState<string>(savedBannerImage);
+  const [isUnsaved, setIsUnsaved] = useState<boolean>(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Ukuran gambar melebihi 5MB. Silakan pilih foto dengan ukuran lebih kecil.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const resultUrl = event.target.result as string;
+          setPreviewBannerImage(resultUrl);
+          setIsUnsaved(true);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSaveBanner = () => {
+    try {
+      localStorage.setItem('custom_landing_banner', previewBannerImage);
+      setSavedBannerImage(previewBannerImage);
+      setIsUnsaved(false);
+      success('Gambar Toko Disimpan!', 'Foto toko Anda telah berhasil diperbarui dan tersimpan di landing page.');
+    } catch (err) {
+      console.error('Save error:', err);
+      alert('Gagal menyimpan gambar ke penyimpanan lokal (file terlalu besar). Silakan pilih file gambar yang dikompresi.');
+    }
+  };
+
+  const handleResetBanner = () => {
+    localStorage.removeItem('custom_landing_banner');
+    setSavedBannerImage(DEFAULT_BANNER);
+    setPreviewBannerImage(DEFAULT_BANNER);
+    setIsUnsaved(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    success('Reset Gambar Bawaan', 'Banner landing page dikembalikan ke foto standar.');
+  };
 
   // Active Preview Tab in Hero Mockup
   const [heroTab, setHeroTab] = useState<'pos' | 'stok' | 'ai' | 'laporan'>('pos');
@@ -81,7 +135,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
   const faqs = [
     {
       q: 'Apakah aplikasi ini memerlukan biaya langganan bulanan?',
-      a: 'TIDAK! Sembako Smart POS AI harganya CUMA Rp 99.000 (99rb) Sekali Bayar (Lifetime License). Setelah membeli lisensi resmi, Anda mendapatkan akses seumur hidup tanpa biaya bulanan atau tahunan tersembunyi.'
+      a: 'TIDAK! Sembako Smart POS AI harganya CUMA Rp 49.000 (49rb) Sekali Bayar (Lifetime License). Setelah membeli lisensi resmi, Anda mendapatkan akses seumur hidup tanpa biaya bulanan atau tahunan tersembunyi.'
     },
     {
       q: 'Apakah aplikasi tetap bisa dipakai saat koneksi internet mati/putus?',
@@ -101,7 +155,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
     },
     {
       q: 'Bagaimana jika saya memerlukan bantuan saat awal penggunaan aplikasi atau ingin membeli lisensi?',
-      a: 'Tim Customer Support kami siap membantu Anda 24/7! Hubungi WhatsApp Customer Support kami untuk bantuan penginstalan, pengisian data produk via Excel, maupun aktivasi kode lisensi Rp 99rb.'
+      a: 'Tim Customer Support kami siap membantu Anda 24/7! Hubungi WhatsApp Customer Support kami untuk bantuan penginstalan, pengisian data produk via Excel, maupun aktivasi kode lisensi Rp 49rb.'
     }
   ];
 
@@ -110,7 +164,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       
       {/* TOP PROMO ANNOUNCEMENT BAR */}
       <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-amber-500 text-slate-950 font-black text-xs py-2 px-4 text-center flex flex-wrap items-center justify-center gap-2 shadow-md">
-        <span>🔥 PROMO KHUSUS HARI INI: HARGA APLIKASI CUMA 99RB (RP 99.000) SEKALI BAYAR SELAMANYA!</span>
+        <span>🔥 PROMO KHUSUS HARI INI: HARGA APLIKASI CUMA 49RB (RP 49.000) SEKALI BAYAR SELAMANYA!</span>
       </div>
 
       {/* 1. TOP NAVIGATION BAR */}
@@ -142,7 +196,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <a href="#fitur" className="hover:text-amber-400 transition-colors">Fitur Utama</a>
             <a href="#perangkat" className="hover:text-amber-400 transition-colors">Kompatibilitas</a>
             <a href="#kalkulator" className="hover:text-amber-400 transition-colors">Kalkulator ROI</a>
-            <a href="#harga" className="hover:text-amber-400 transition-colors">Paket Harga (99rb)</a>
+            <a href="#harga" className="hover:text-amber-400 transition-colors">Paket Harga (49rb)</a>
             <a href="#testimoni" className="hover:text-amber-400 transition-colors">Testimoni</a>
             <a href="#faq" className="hover:text-amber-400 transition-colors">FAQ</a>
           </nav>
@@ -178,10 +232,85 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10 space-y-8">
           
+          {/* TOKO SEMBAKO HERO BANNER IMAGE CARD - TOP POSITION */}
+          <div className="max-w-5xl mx-auto">
+            <div className="relative rounded-3xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl shadow-emerald-950/90 group bg-slate-900">
+              {/* Hidden File Input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                accept="image/*"
+                className="hidden"
+              />
+
+              {/* Image Frame */}
+              <div className="relative h-64 sm:h-80 md:h-[420px] w-full overflow-hidden">
+                <img
+                  src={previewBannerImage}
+                  alt="Toko Sembako Modern Sembako Smart AI"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover object-center transform group-hover:scale-105 transition-transform duration-700 filter brightness-90"
+                />
+
+                {/* Dark Vignette & Ambient Glow Overlays */}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/20" />
+                <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-transparent to-slate-950/80" />
+
+                {/* Top Badges Overlay */}
+                <div className="absolute top-4 left-4 sm:top-6 sm:left-6 flex flex-wrap items-center gap-2 z-10">
+                  <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md border border-emerald-500/40 text-emerald-300 text-xs font-black flex items-center gap-2 shadow-xl">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Toko Sembako Realistis & Modern</span>
+                  </div>
+                  <div className="px-3.5 py-1.5 rounded-xl bg-amber-500/95 backdrop-blur-md text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-xl">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Sistem POS AI Terintegrasi</span>
+                  </div>
+                </div>
+
+                <div className="absolute top-4 right-4 sm:top-6 sm:right-6 hidden sm:flex items-center gap-2 z-10">
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-950/80 backdrop-blur-md border border-slate-700 text-slate-300 text-xs font-extrabold flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Solusi Grosir & Eceran</span>
+                  </div>
+                </div>
+
+                {/* Bottom Overlay Text & Stats */}
+                <div className="absolute bottom-4 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-6 z-10 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
+                  <div className="space-y-1.5 text-left">
+                    <div className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase text-amber-300 tracking-wider bg-amber-950/60 border border-amber-500/30 px-2.5 py-0.5 rounded-lg">
+                      <Store className="w-3 h-3" />
+                      <span>Visualisasi Toko Kelontong Sembako</span>
+                    </div>
+                    <h3 className="text-xl sm:text-2xl md:text-3xl font-black text-white leading-tight">
+                      Ubah Toko Sembako Tradisional Anda Jadi Super Efisien
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-300 max-w-xl leading-relaxed">
+                      Lengkapi toko beras, minyak, gula, mi instan, dan 1000+ item sembako Anda dengan teknologi Kasir POS, Scan Barcode Kamera, Cetak Struk Bluetooth & AI Stok Otomatis.
+                    </p>
+                  </div>
+
+                  {/* Quick Feature Badges on Photo */}
+                  <div className="flex items-center gap-2.5 self-stretch sm:self-auto shrink-0">
+                    <div className="flex-1 sm:flex-initial px-4 py-2.5 rounded-2xl bg-slate-950/90 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg">
+                      <span className="text-[10px] text-slate-400 uppercase font-extrabold block">Kecepatan Kasir</span>
+                      <span className="text-xs sm:text-sm font-black text-emerald-400">&lt; 3 Detik / Nota</span>
+                    </div>
+                    <div className="flex-1 sm:flex-initial px-4 py-2.5 rounded-2xl bg-slate-950/90 backdrop-blur-md border border-amber-500/40 text-center shadow-lg">
+                      <span className="text-[10px] text-slate-400 uppercase font-extrabold block">Stok Realtime</span>
+                      <span className="text-xs sm:text-sm font-black text-amber-300">100% Bebas Bocor</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Top Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-extrabold tracking-wide">
             <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>🔥 PROMO LISENSI LENGKAP CUMA 99RB SEKALI BAYAR SELAMANYA</span>
+            <span>🔥 PROMO LISENSI LENGKAP CUMA 49RB SEKALI BAYAR SELAMANYA</span>
           </div>
 
           {/* Main Title */}
@@ -194,35 +323,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
           {/* Subtitle Description */}
           <p className="text-slate-300 text-base sm:text-lg max-w-3xl mx-auto leading-relaxed">
-            Tinggalkan pencatatan manual! Sembako Smart POS AI membantu Anda mengelola ribuan produk sembako, scan barcode kamera HP, cetak nota Bluetooth, serta deteksi stok kritis & barang kedaluwarsa secara otomatis. Cuma 99rb sekali bayar!
+            Tinggalkan pencatatan manual! Sembako Smart POS AI membantu Anda mengelola ribuan produk sembako, scan barcode kamera HP, cetak nota Bluetooth, serta deteksi stok kritis & barang kedaluwarsa secara otomatis. Cuma 49rb sekali bayar!
           </p>
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
             <button
-              onClick={handleStartDemo}
-              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              onClick={() => onNavigate('login')}
+              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 hover:from-emerald-400 hover:to-amber-300 text-slate-950 font-black text-sm shadow-2xl shadow-emerald-500/30 flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 cursor-pointer border-2 border-amber-300/60"
             >
-              <Zap className="w-5 h-5 text-slate-950 fill-slate-950" />
-              <span>Coba Akses Demo Instant (6 Jam Gratis)</span>
+              <Lock className="w-5 h-5 text-slate-950" />
+              <span>Masuk Ke Menu Login Aplikasi</span>
               <ArrowRight className="w-4 h-4" />
             </button>
 
+            <button
+              onClick={handleStartDemo}
+              className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-extrabold text-sm shadow-xl flex items-center justify-center gap-2.5 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            >
+              <Zap className="w-5 h-5 text-amber-400 fill-amber-400" />
+              <span>Coba Demo Instant 6 Jam</span>
+            </button>
+
             <a
-              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
+              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2049rb"
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-3 transition-all cursor-pointer shadow-lg shadow-emerald-500/20"
+              className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-extrabold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-lg"
             >
-              <MessageSquare className="w-5 h-5 fill-slate-950" />
-              <span>Beli Lisensi 99rb via WhatsApp</span>
+              <MessageSquare className="w-5 h-5 fill-emerald-400 text-emerald-400" />
+              <span>Beli Lisensi 49rb</span>
             </a>
           </div>
 
           {/* Guarantee Badges */}
           <div className="pt-6 flex flex-wrap items-center justify-center gap-6 text-xs font-semibold text-slate-400">
             <span className="flex items-center gap-1.5 text-emerald-400">
-              <CheckCircle2 className="w-4 h-4" /> 100% Cuma 99rb Sekali Bayar (Tanpa Biaya Bulanan)
+              <CheckCircle2 className="w-4 h-4" /> 100% Cuma 49rb Sekali Bayar (Tanpa Biaya Bulanan)
             </span>
             <span className="flex items-center gap-1.5 text-emerald-400">
               <CheckCircle2 className="w-4 h-4" /> Offline Ready (Bisa Tanpa Internet)
@@ -947,7 +1084,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <span>Pilihan Paket Lisensi Aplikasi</span>
           </div>
           <h2 className="text-3xl sm:text-4xl font-black text-slate-100">
-            Lisensi Sekali Bayar Cuma Rp 99.000, Tanpa Biaya Bulanan!
+            Lisensi Sekali Bayar Cuma Rp 49.000, Tanpa Biaya Bulanan!
           </h2>
           <p className="text-slate-400 text-sm">Promo spesial terbatas! Dapatkan akses seumur hidup untuk seluruh fitur kasir POS & AI Asisten.</p>
         </div>
@@ -997,7 +1134,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* Package 2: PRO AI SMART (BEST SELLER) */}
           <div className="p-8 rounded-3xl bg-gradient-to-b from-emerald-950/60 via-slate-900 to-slate-950 border-2 border-emerald-500 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/10">
             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wider shadow-md whitespace-nowrap">
-              ★ PROMO TERBAIK - CUMA 99RB SEKALI BAYAR ★
+              ★ PROMO TERBAIK - CUMA 49RB SEKALI BAYAR ★
             </div>
 
             <div className="space-y-4 pt-2">
@@ -1010,7 +1147,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               <div className="space-y-1">
                 <span className="text-xs text-slate-500 line-through">Rp 499.000</span>
                 <div className="text-3xl font-black text-emerald-400 font-mono">
-                  Rp 99.000 <span className="text-xs font-sans text-slate-400 font-normal">/ Sekali Bayar</span>
+                  Rp 49.000 <span className="text-xs font-sans text-slate-400 font-normal">/ Sekali Bayar</span>
                 </div>
                 <p className="text-[11px] text-amber-300 font-bold">100% Bebas Biaya Bulanan / Tahunan!</p>
               </div>
@@ -1042,13 +1179,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
             <div className="space-y-2.5">
               <a
-                href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
+                href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2049rb"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
               >
                 <MessageSquare className="w-4 h-4 fill-slate-950" />
-                <span>Beli Lisensi 99rb via WhatsApp</span>
+                <span>Beli Lisensi 49rb via WhatsApp</span>
               </a>
               <button
                 onClick={() => onNavigate('login')}
@@ -1191,7 +1328,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 relative z-10">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Harga Promo Cuma Rp 99.000 Sekali Bayar Selamanya!</span>
+            <span>Harga Promo Cuma Rp 49.000 Sekali Bayar Selamanya!</span>
           </div>
           <h2 className="text-3xl sm:text-5xl font-black text-slate-100">
             Siap Mengembangkan Toko Sembako Anda Hari Ini?
@@ -1208,13 +1345,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               <span>Coba Demo Instant (6 Jam Gratis)</span>
             </button>
             <a
-              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
+              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2049rb"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-105"
             >
               <MessageSquare className="w-5 h-5 fill-slate-950" />
-              <span>Beli Lisensi 99rb via WhatsApp</span>
+              <span>Beli Lisensi 49rb via WhatsApp</span>
             </a>
           </div>
         </div>
@@ -1243,7 +1380,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
       {/* FLOATING WHATSAPP CUSTOMER SUPPORT BUTTON */}
       <a
-        href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20tanya%20paket%20lisensi%2099rb"
+        href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20tanya%20paket%20lisensi%2049rb"
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-2xl shadow-emerald-500/50 hover:scale-105 active:scale-95 transition-all cursor-pointer border-2 border-emerald-300"

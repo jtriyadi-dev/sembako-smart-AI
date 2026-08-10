@@ -157,13 +157,13 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({ isOpen, onClose }) =
           </button>
 
           <a
-            href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20kode%20lisensi%2099rb"
+            href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20kode%20lisensi%2049rb"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
             <MessageSquare className="w-4 h-4 text-emerald-500" />
-            <span>Beli Kode Lisensi 99rb via WhatsApp</span>
+            <span>Beli Kode Lisensi 49rb via WhatsApp</span>
           </a>
         </form>
 

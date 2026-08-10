@@ -1082,7 +1082,7 @@ export const SettingPage: React.FC = () => {
                   className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase"
                 />
                 <p className="text-[11px] text-slate-500">
-                  Ketik 16-karakter License Key resmi yang terdaftar saat pembelian aplikasi (Rp 99rb sekali bayar).
+                  Ketik 16-karakter License Key resmi yang terdaftar saat pembelian aplikasi (Rp 49rb sekali bayar).
                 </p>
 
                 <button
@@ -1108,13 +1108,13 @@ export const SettingPage: React.FC = () => {
 
                 <div className="pt-2">
                   <a
-                    href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20kode%20lisensi%2099rb"
+                    href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20kode%20lisensi%2049rb"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs flex items-center justify-center gap-2 transition-colors"
                   >
                     <MessageSquare className="w-4 h-4 text-emerald-500" />
-                    <span>Beli Kode Lisensi 99rb via WhatsApp</span>
+                    <span>Beli Kode Lisensi 49rb via WhatsApp</span>
                   </a>
                 </div>
               </div>
