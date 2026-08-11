@@ -86,27 +86,51 @@ export default async function handler(req: any, res: any) {
           updatedAt: new Date().toISOString()
         };
 
+        const replyMessage = `✅ [POS Toko Sembako] Produk "${nama}" berhasil ditambahkan ke katalog toko dengan stok ${stok} ${satuan}!`;
+
         return res.status(200).json({
           status: true,
           detail: `Berhasil memproses produk "${nama}"`,
-          data: newProduct,
-          reply: `✅ [POS Toko Sembako] Produk "${nama}" berhasil ditambahkan ke katalog toko dengan stok ${stok} ${satuan}!`
+          reply: replyMessage,
+          response: replyMessage,
+          text: replyMessage,
+          message: replyMessage,
+          data: [
+            {
+              message: replyMessage,
+              product: newProduct
+            }
+          ]
         });
       }
 
       // Check for !stok command
       if (messageText.toLowerCase().startsWith('!stok') || messageText.toLowerCase().startsWith('!cekstok')) {
+        const replyMessage = '📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif. Silakan gunakan dashboard POS untuk melihat laporan lengkap.';
         return res.status(200).json({
           status: true,
           detail: 'Perintah !stok diproses',
-          reply: '📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif. Silakan gunakan dashboard POS untuk melihat laporan lengkap.'
+          reply: replyMessage,
+          response: replyMessage,
+          text: replyMessage,
+          message: replyMessage,
+          data: [
+            {
+              message: replyMessage
+            }
+          ]
         });
       }
 
       // Default response
+      const defaultReply = 'ℹ️ [POS Toko Sembako] Format pesan tidak dikenali. Gunakan format: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok untuk menambah produk.';
       return res.status(200).json({
         status: true,
         detail: 'Pesan diterima tetapi tidak memicu kata kunci khusus',
+        reply: defaultReply,
+        response: defaultReply,
+        text: defaultReply,
+        message: defaultReply,
         help: 'Gunakan format PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok untuk menambah produk.'
       });
     } catch (err: any) {

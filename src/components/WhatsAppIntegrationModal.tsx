@@ -225,12 +225,19 @@ Minyak Filma 2L, Beli 32000, Jual 36000, Stok 15, Satuan pouch`;
 
   // --- TAB BOT SIMULATOR & WEBHOOK HANDLER ---
   const [copiedWebhookUrl, setCopiedWebhookUrl] = useState(false);
-  const currentWebhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : 'https://domain-toko.com/api/whatsapp/webhook';
+  const [customDomain, setCustomDomain] = useState('sembako-smart-ai.vercel.app');
+  
+  const isPreviewEnv = typeof window !== 'undefined' && (window.location.hostname.includes('run.app') || window.location.hostname.includes('localhost'));
+  
+  const productionWebhookUrl = `https://${customDomain.replace(/^https?:\/\//, '').replace(/\/+$/, '')}/api/whatsapp/webhook`;
+  const currentPreviewWebhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : productionWebhookUrl;
+  
+  const activeCopyUrl = isPreviewEnv ? productionWebhookUrl : currentPreviewWebhookUrl;
 
-  const handleCopyWebhookUrl = () => {
-    navigator.clipboard.writeText(currentWebhookUrl);
+  const handleCopyWebhookUrl = (urlToCopy: string) => {
+    navigator.clipboard.writeText(urlToCopy);
     setCopiedWebhookUrl(true);
-    success('URL Webhook berhasil disalin! Tempelkan URL ini di Webhook Settings Fonnte/Wablas/Gateway Anda.');
+    success('URL Webhook Vercel berhasil disalin! Tempelkan di Webhook Settings Fonnte/Wablas Anda.');
     setTimeout(() => setCopiedWebhookUrl(false), 2500);
   };
 
@@ -630,26 +637,38 @@ Minyak Filma 2L, Beli 32000, Jual 36000, Stok 15, Satuan pouch`;
               </p>
 
               {/* Webhook Endpoint Box */}
-              <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-500/40 text-xs space-y-2">
+              <div className="p-4 rounded-xl bg-slate-950/90 border border-emerald-500/40 text-xs space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-black text-emerald-400 uppercase text-[11px] tracking-wider flex items-center gap-1.5">
-                    <Send className="w-3.5 h-3.5 text-amber-400" /> URL Webhook Server Aktif (HTTP POST):
+                    <Send className="w-3.5 h-3.5 text-amber-400" /> URL Webhook Vercel Deploy (Gunakan URL Ini di Fonnte/Wablas):
                   </span>
                   <button
                     type="button"
-                    onClick={handleCopyWebhookUrl}
-                    className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center gap-1 cursor-pointer shadow-sm transition-all"
+                    onClick={() => handleCopyWebhookUrl(productionWebhookUrl)}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center gap-1 cursor-pointer shadow-md transition-all"
                   >
                     {copiedWebhookUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedWebhookUrl ? 'Tersalin' : 'Salin URL Webhook'}</span>
+                    <span>{copiedWebhookUrl ? 'Tersalin' : 'Salin URL Webhook Vercel'}</span>
                   </button>
                 </div>
-                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 font-mono text-emerald-300 text-xs break-all select-all">
-                  {currentWebhookUrl}
+
+                <div className="p-3 rounded-lg bg-slate-900 border border-emerald-500/30 font-mono text-emerald-300 text-xs break-all select-all font-bold">
+                  {productionWebhookUrl}
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  📍 Tempelkan URL di atas ke kolom <strong>Webhook / Callback URL</strong> pada dashboard WhatsApp Gateway Anda (seperti Fonnte, Wablas, Whacenter, UltraMsg, dll).
-                </p>
+
+                {/* Important Alert Callout for External Gateways */}
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] space-y-1.5">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-300">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    Penting: Mengapa Dilarang Pakai URL Preview AI Studio (`*.run.app`)?
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[10px]">
+                    URL preview Google AI Studio (`https://ais-dev-...run.app` / `ais-pre-...run.app`) dilindungi oleh sistem keamanan login/cookie. Jika Fonnte / Wablas dipasangi URL preview, server gateway akan menerima error balasan HTML <code className="text-amber-300 font-mono">Cookie check / Action required</code>.
+                  </p>
+                  <p className="text-emerald-300 font-semibold text-[10px]">
+                    ✅ Selalu gunakan URL Vercel hasil deploy Publik: <span className="underline font-mono text-white">{productionWebhookUrl}</span> di dashboard WhatsApp Gateway Anda!
+                  </p>
+                </div>
               </div>
             </div>
 
