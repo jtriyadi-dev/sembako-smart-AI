@@ -1,3 +1,5 @@
+import { processProductWebhook, processStockUpdateWebhook } from '../../src/services/backendStore';
+
 export default async function handler(req: any, res: any) {
   // Enable CORS for Vercel Serverless Function
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -25,7 +27,7 @@ export default async function handler(req: any, res: any) {
       status: true,
       message: 'WhatsApp Webhook Endpoint POS Toko Sembako Siap Menerima HTTP POST',
       documentation: 'Kirim HTTP POST ke endpoint ini dengan payload JSON/Form dari Fonnte, Wablas, Whacenter, atau Custom Bot.',
-      supportedFormat: 'PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok'
+      supportedFormat: 'PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok ATAU STOK#Nama#TambahanStok'
     });
   }
 
@@ -52,7 +54,24 @@ export default async function handler(req: any, res: any) {
         });
       }
 
-      // Check if message matches product creation format
+      // Check if message is a direct stock add command (e.g. STOK#Minyak Bimoli 2L#30 or TAMBAHSTOK#Minyak Bimoli 2L#20)
+      const isStockOnlyCmd = (messageText.toUpperCase().startsWith('STOK#') || messageText.toUpperCase().startsWith('TAMBAHSTOK#')) && messageText.includes('#');
+      if (isStockOnlyCmd) {
+        const parts = messageText.split('#').map((p: string) => p.trim());
+        const nama = parts[1] || 'Produk';
+        const addedStock = parseInt(parts[2]?.replace(/\D/g, '') || '0', 10);
+
+        const replyMsg = await processStockUpdateWebhook(nama, addedStock, sender);
+        return res.status(200).json({
+          data: [
+            {
+              message: replyMsg
+            }
+          ]
+        });
+      }
+
+      // Check if message matches product creation/update format
       const isProductFormat = messageText.toUpperCase().startsWith('PRODUK#') || messageText.includes('#');
 
       if (isProductFormat) {
@@ -67,31 +86,22 @@ export default async function handler(req: any, res: any) {
         const satuan = parts[startIndex + 5] || 'Pcs';
         const minStok = parseInt(parts[startIndex + 6]?.replace(/\D/g, '') || '5', 10);
 
-        const newProduct = {
-          kode: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-          barcode: `${Math.floor(8990000000000 + Math.random() * 9999999)}`,
+        // Process in Firestore (Add new or Update existing stock)
+        const result = await processProductWebhook({
           nama,
           kategori,
           hargaBeli,
           hargaJual: hargaJual || Math.round(hargaBeli * 1.15),
           stok,
-          minStok,
           satuan,
-          gambarUrl: '',
-          deskripsi: `Otomatis diimpor oleh WhatsApp Bot Webhook (Pengirim: ${sender})`,
-          expiredDate: '',
-          batchNo: '',
-          terjual: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-
-        const replyMessage = `✅ [POS Toko Sembako] Produk "${nama}" berhasil ditambahkan ke katalog toko dengan stok ${stok} ${satuan}!`;
+          minStok,
+          sender
+        });
 
         return res.status(200).json({
           data: [
             {
-              message: replyMessage
+              message: result.message
             }
           ]
         });
@@ -110,7 +120,7 @@ export default async function handler(req: any, res: any) {
       }
 
       // Default response
-      const defaultReply = 'ℹ️ [POS Toko Sembako] Format pesan tidak dikenali. Gunakan format: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok untuk menambah produk.';
+      const defaultReply = 'ℹ️ [POS Toko Sembako] Format pesan tidak dikenali.\n\n• Tambah/Update Produk:\nPRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok\n\n• Tambah Stok Saja:\nSTOK#Nama#JumlahStokBaru';
       return res.status(200).json({
         data: [
           {
@@ -119,9 +129,13 @@ export default async function handler(req: any, res: any) {
         ]
       });
     } catch (err: any) {
+      console.error('Webhook error:', err);
       return res.status(200).json({
-        status: false,
-        message: err?.message || 'Internal Webhook Error'
+        data: [
+          {
+            message: `❌ [POS Toko Sembako] Gagal memproses data: ${err?.message || 'Error internal server'}`
+          }
+        ]
       });
     }
   }
@@ -129,3 +143,4 @@ export default async function handler(req: any, res: any) {
   // Fallback for any other HTTP method
   return res.status(200).json({ status: true, message: 'Webhook endpoint active' });
 }
+
