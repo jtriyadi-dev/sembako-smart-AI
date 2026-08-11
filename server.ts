@@ -134,16 +134,9 @@ async function startServer() {
         const replyMessage = `✅ [POS Toko Sembako] Produk "${nama}" berhasil ditambahkan ke katalog toko dengan stok ${stok} ${satuan}!`;
 
         return res.json({
-          status: true,
-          detail: `Berhasil memproses produk "${nama}"`,
-          reply: replyMessage,
-          response: replyMessage,
-          text: replyMessage,
-          message: replyMessage,
           data: [
             {
-              message: replyMessage,
-              product: newProduct
+              message: replyMessage
             }
           ]
         });
@@ -165,12 +158,6 @@ async function startServer() {
         const replyMessage = "📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif. Silakan gunakan dashboard POS untuk melihat laporan lengkap.";
 
         return res.json({
-          status: true,
-          detail: "Perintah !stok diproses",
-          reply: replyMessage,
-          response: replyMessage,
-          text: replyMessage,
-          message: replyMessage,
           data: [
             {
               message: replyMessage
@@ -194,13 +181,11 @@ async function startServer() {
       const defaultReply = "ℹ️ [POS Toko Sembako] Format pesan tidak dikenali. Gunakan format: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok untuk menambah produk.";
 
       return res.json({
-        status: true,
-        detail: "Pesan diterima tetapi tidak memicu kata kunci tertentu",
-        reply: defaultReply,
-        response: defaultReply,
-        text: defaultReply,
-        message: defaultReply,
-        help: "Gunakan format PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok untuk menambah produk."
+        data: [
+          {
+            message: defaultReply
+          }
+        ]
       });
 
     } catch (err: any) {
