@@ -1181,7 +1181,7 @@ export const SettingPage: React.FC = () => {
                 Buku Panduan Operasional Sembako Smart AI
               </h2>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                Pelajari seluruh fitur platform dari Pengaturan Toko, Barcode Scanner, Kasir POS, Retur Items, Stock Opname, hingga analisis Gemini AI. Anda juga dapat mengunduh dokumen panduan format PDF lengkap dengan diagram alur kerja.
+                Pelajari seluruh fitur platform dari Pengaturan Toko, Barcode Scanner, Kasir POS, Retur Items, Stock Opname, hingga analisis Smart AI. Anda juga dapat mengunduh dokumen panduan format PDF lengkap dengan diagram alur kerja.
               </p>
             </div>
 
@@ -1402,7 +1402,7 @@ export const SettingPage: React.FC = () => {
                   },
                   {
                     step: '8',
-                    title: 'Analisis Gemini AI',
+                    title: 'Analisis Smart AI',
                     icon: Sparkles,
                     summary: 'Kecerdasan AI untuk analisis barang laris, deadstock, dan promo.',
                     points: [
@@ -2533,7 +2533,7 @@ export const SettingPage: React.FC = () => {
                 Spesifikasi & Mesin AI
               </h4>
               <ul className="space-y-1.5 text-slate-500">
-                <li>• **AI Engine:** Google Gemini 2.5 Flash</li>
+                <li>• **AI Engine:** Sembako Smart AI Engine</li>
                 <li>• **Database:** Cloud Firestore Realtime Sync</li>
                 <li>• **Audio Engine:** Web Speech API (Voice Command)</li>
                 <li>• **Export Engine:** jsPDF & SheetJS (.xlsx)</li>

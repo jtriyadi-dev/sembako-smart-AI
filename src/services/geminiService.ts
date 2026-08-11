@@ -276,7 +276,7 @@ function generateFirestoreSmartFallback(prompt: string, contextData?: FirestoreD
     )}\n` +
     `  - Stok Menipis: ${products.filter((p) => p.stok <= p.minStok).length} barang\n\n` +
     `💡 *Rekomendasi Operasional AI:* Tingkatkan promosi paket sembako murah menjelang awal bulan dan pantau terus stok beras, minyak goreng, dan gula pasir.\n\n` +
-    `*(Keterangan: Layanan Gemini API siap terhubung secara penuh saat API Key diaktifkan di Secrets)*`
+    `*(Keterangan: Layanan AI Engine siap terhubung secara penuh saat API Key diaktifkan di Secrets)*`
   );
 }
 

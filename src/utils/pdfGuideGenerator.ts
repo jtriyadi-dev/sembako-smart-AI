@@ -256,7 +256,7 @@ export function exportUserGuideToPDF() {
       'Pilih lebar kertas (58mm atau 80mm). Aktifkan toggle "Otomatis Cetak Struk Setelah Pembayaran" untuk memicu dialog cetak printer thermal secara langsung.',
     ],
     [
-      '8. Kecerdasan Gemini AI Assistant',
+      '8. Kecerdasan Smart AI Assistant',
       'Menu AI Assistant',
       'Tanyakan pertanyaan analisis bisnis seperti: "Barang apa yang paling laris minggu ini?", "Berapa estimasi nilai stok gudang?", atau "Buat paket promo bundling sembako".',
     ],
@@ -342,14 +342,14 @@ export function exportUserGuideToPDF() {
     currentY = 40;
   }
 
-  // --- GEMINI AI PROMPTS REFERENCE ---
+  // --- SMART AI PROMPTS REFERENCE ---
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 118, 110);
-  doc.text('4. CONTOH PERTANYAAN ANALISIS GEMINI AI ASSISTANT', 14, currentY);
+  doc.text('4. CONTOH PERTANYAAN ANALISIS SMART AI ASSISTANT', 14, currentY);
   currentY += 4;
 
-  const aiHead = [['Topik Analisis AI', 'Contoh Perintah / Pertanyaan ke Gemini AI']];
+  const aiHead = [['Topik Analisis AI', 'Contoh Perintah / Pertanyaan ke Smart AI']];
   const aiBody = [
     ['Produk Terlaris', '"Produk sembako apa yang paling banyak terjual minggu ini dan memberikan keuntungan terbesar?"'],
     ['Peringatan Stok Gudang', '"Barang apa saja yang stoknya di bawah batas minimum dan harus segera dibeli ke supplier?"'],

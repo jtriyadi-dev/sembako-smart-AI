@@ -35,7 +35,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       badge: 'SaaS Enterprise Edition',
       color: 'from-emerald-600 to-amber-500',
       description:
-        'Aplikasi pintar khusus pemilik & kasir toko sembako grosir maupun eceran. Dilengkapi kecerdasan AI Google Gemini 2.5 Flash, pencetakan struk thermal Bluetooth, serta sinkronisasi otomatis Cloud Firestore.',
+        'Aplikasi pintar khusus pemilik & kasir toko sembako grosir maupun eceran. Dilengkapi kecerdasan AI Asisten Pintar, pencetakan struk thermal Bluetooth, serta sinkronisasi otomatis Cloud Firestore.',
       highlights: [
         'Navigasi Responsif: Touch-Friendly Desktop, Tablet & Mobile App',
         'Pencarian Cepat & Barcode Scanner terintegrasi camera / USB',
@@ -57,10 +57,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       ],
     },
     {
-      title: 'Kecerdasan AI Gemini 2.5 Flash',
+      title: 'Kecerdasan Smart AI Asisten',
       subtitle: 'Asisten AI Bisnis Sembako & Perintah Suara (Voice Command)',
       icon: Sparkles,
-      badge: 'Gemini 2.5 Flash',
+      badge: 'Smart AI Engine',
       color: 'from-amber-500 to-emerald-700',
       description:
         'Tanyakan apa saja seputar kesehatan toko Anda kepada AI. Analisis stok mati (deadstock), saran batas restock, hingga rekap barang paling laris dalam hitungan detik.',

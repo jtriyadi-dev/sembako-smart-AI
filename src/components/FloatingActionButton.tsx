@@ -81,7 +81,7 @@ export const FloatingActionButton: React.FC<FABProps> = ({ onNavigate }) => {
                 </div>
               </button>
 
-              {/* Action 4: Gemini AI Assistant */}
+              {/* Action 4: Smart AI Assistant */}
               <button
                 onClick={() => handleAction('ai-assistant')}
                 className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-emerald-900 via-emerald-800 to-amber-700 text-white border border-amber-400/40 shadow-2xl hover:scale-105 active:scale-95 transition-all group cursor-pointer touch-target"

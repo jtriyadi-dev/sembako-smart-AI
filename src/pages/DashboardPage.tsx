@@ -838,7 +838,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
-                    Sembako Gemini AI
+                    Sembako Smart AI
                   </h4>
                   <p className="text-[10px] text-slate-400">Rekomendasi Cerdas Toko</p>
                 </div>
@@ -1225,7 +1225,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-md">
               <Sparkles className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-amber-300">Analisis AI Gemini</span>
+            <span className="text-xs font-bold text-amber-300">Analisis Smart AI</span>
           </button>
 
           <button

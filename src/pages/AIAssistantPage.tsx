@@ -466,7 +466,7 @@ export const AIAssistantPage: React.FC = () => {
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-600 dark:text-amber-300 border border-amber-400/30 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
-                  <span>Gemini 2.5 Flash</span>
+                  <span>Smart AI Engine</span>
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">

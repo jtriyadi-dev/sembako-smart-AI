@@ -120,14 +120,14 @@ export const DocumentationModal: React.FC<DocumentationModalProps> = ({
     {
       id: 'ai',
       step: '6',
-      title: 'Kecerdasan Gemini AI & Perintah Suara (Voice Command)',
+      title: 'Kecerdasan Smart AI & Perintah Suara (Voice Command)',
       icon: Sparkles,
       badge: 'AI Assistant',
       color: 'border-emerald-500/30 bg-emerald-500/5',
       summary: 'Manfaatkan kecerdasan AI untuk analisis toko dan kontrol aplikasi lewat suara.',
       points: [
         'Perintah Suara: Tekan ikon Mikrofon di pencarian kasir dan katakan misalnya "Beras Sania 5kg" untuk memasukkan ke keranjang secara bebas genggam.',
-        'Gemini AI Assistant: Buka menu "AI Assistant". Tanyakan analisis barang terlaris, barang mati (deadstock), atau saran paket bundling promo.',
+        'Smart AI Assistant: Buka menu "AI Assistant". Tanyakan analisis barang terlaris, barang mati (deadstock), atau saran paket bundling promo.',
       ],
     },
     {
@@ -332,11 +332,11 @@ export const DocumentationModal: React.FC<DocumentationModalProps> = ({
           </div>
         )}
 
-        {/* TAB 3: GEMINI AI PROMPTS */}
+        {/* TAB 3: SMART AI PROMPTS */}
         {activeTab === 'ai' && (
           <div className="space-y-4 text-xs">
             <p className="text-slate-500">
-              Contoh pertanyaan cerdas untuk dianalisis oleh **Gemini AI Assistant**:
+              Contoh pertanyaan cerdas untuk dianalisis oleh **Smart AI Assistant**:
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

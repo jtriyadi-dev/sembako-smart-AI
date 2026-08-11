@@ -127,7 +127,7 @@ export const SidebarDesktop: React.FC<SidebarDesktopProps> = ({ currentPage, onN
             </span>
           </div>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Pondasi database & AI terintegrasi dengan Firebase & Gemini.
+            Pondasi database & AI terintegrasi dengan Firebase & Smart AI.
           </p>
         </div>
       )}

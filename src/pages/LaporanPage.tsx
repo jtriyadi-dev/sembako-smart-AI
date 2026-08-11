@@ -735,7 +735,7 @@ export const LaporanPage: React.FC = () => {
         </div>
 
         <button
-          onClick={() => info('Analisis AI', 'Sistem AI Gemini siap menghitung rekomendasi stok.')}
+          onClick={() => info('Analisis AI', 'Sistem Smart AI siap menghitung rekomendasi stok.')}
           className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center gap-2 cursor-pointer shadow-lg whitespace-nowrap"
         >
           <Sparkles className="w-4 h-4 text-slate-950" />

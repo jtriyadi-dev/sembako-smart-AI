@@ -135,7 +135,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
   const faqs = [
     {
       q: 'Apakah aplikasi ini memerlukan biaya langganan bulanan?',
-      a: 'TIDAK! Sembako Smart POS AI harganya CUMA Rp 49.000 (49rb) Sekali Bayar (Lifetime License). Setelah membeli lisensi resmi, Anda mendapatkan akses seumur hidup tanpa biaya bulanan atau tahunan tersembunyi.'
+      a: 'TIDAK! Sembako Smart POS AI harganya CUMA Rp 99.000 (99rb) Sekali Bayar (Lifetime License). Setelah membeli lisensi resmi, Anda mendapatkan akses seumur hidup tanpa biaya bulanan atau tahunan tersembunyi.'
     },
     {
       q: 'Apakah aplikasi tetap bisa dipakai saat koneksi internet mati/putus?',
@@ -155,7 +155,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
     },
     {
       q: 'Bagaimana jika saya memerlukan bantuan saat awal penggunaan aplikasi atau ingin membeli lisensi?',
-      a: 'Tim Customer Support kami siap membantu Anda 24/7! Hubungi WhatsApp Customer Support kami untuk bantuan penginstalan, pengisian data produk via Excel, maupun aktivasi kode lisensi Rp 49rb.'
+      a: 'Tim Customer Support kami siap membantu Anda 24/7! Hubungi WhatsApp Customer Support kami untuk bantuan penginstalan, pengisian data produk via Excel, maupun aktivasi kode lisensi Rp 99rb.'
     }
   ];
 
@@ -164,7 +164,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       
       {/* TOP PROMO ANNOUNCEMENT BAR */}
       <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-amber-500 text-slate-950 font-black text-xs py-2 px-4 text-center flex flex-wrap items-center justify-center gap-2 shadow-md">
-        <span>🔥 PROMO KHUSUS HARI INI: HARGA APLIKASI CUMA 49RB (RP 49.000) SEKALI BAYAR SELAMANYA!</span>
+        <span>🔥 PROMO KHUSUS HARI INI: HARGA APLIKASI CUMA 99RB (RP 99.000) SEKALI BAYAR SELAMANYA!</span>
       </div>
 
       {/* 1. TOP NAVIGATION BAR */}
@@ -196,7 +196,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <a href="#fitur" className="hover:text-amber-400 transition-colors">Fitur Utama</a>
             <a href="#perangkat" className="hover:text-amber-400 transition-colors">Kompatibilitas</a>
             <a href="#kalkulator" className="hover:text-amber-400 transition-colors">Kalkulator ROI</a>
-            <a href="#harga" className="hover:text-amber-400 transition-colors">Paket Harga (49rb)</a>
+            <a href="#harga" className="hover:text-amber-400 transition-colors">Paket Harga (99rb)</a>
             <a href="#testimoni" className="hover:text-amber-400 transition-colors">Testimoni</a>
             <a href="#faq" className="hover:text-amber-400 transition-colors">FAQ</a>
           </nav>
@@ -310,7 +310,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* Top Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-extrabold tracking-wide">
             <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>🔥 PROMO LISENSI LENGKAP CUMA 49RB SEKALI BAYAR SELAMANYA</span>
+            <span>🔥 PROMO LISENSI LENGKAP CUMA 99RB SEKALI BAYAR SELAMANYA</span>
           </div>
 
           {/* Main Title */}
@@ -323,7 +323,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
           {/* Subtitle Description */}
           <p className="text-slate-300 text-base sm:text-lg max-w-3xl mx-auto leading-relaxed">
-            Tinggalkan pencatatan manual! Sembako Smart POS AI membantu Anda mengelola ribuan produk sembako, scan barcode kamera HP, cetak nota Bluetooth, serta deteksi stok kritis & barang kedaluwarsa secara otomatis. Cuma 49rb sekali bayar!
+            Tinggalkan pencatatan manual! Sembako Smart POS AI membantu Anda mengelola ribuan produk sembako, scan barcode kamera HP, cetak nota Bluetooth, serta deteksi stok kritis & barang kedaluwarsa secara otomatis. Cuma 99rb sekali bayar!
           </p>
 
           {/* Action Buttons */}
@@ -346,20 +346,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             </button>
 
             <a
-              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2049rb"
+              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-extrabold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-lg"
             >
               <MessageSquare className="w-5 h-5 fill-emerald-400 text-emerald-400" />
-              <span>Beli Lisensi 49rb</span>
+              <span>Beli Lisensi 99rb</span>
             </a>
           </div>
 
           {/* Guarantee Badges */}
           <div className="pt-6 flex flex-wrap items-center justify-center gap-6 text-xs font-semibold text-slate-400">
             <span className="flex items-center gap-1.5 text-emerald-400">
-              <CheckCircle2 className="w-4 h-4" /> 100% Cuma 49rb Sekali Bayar (Tanpa Biaya Bulanan)
+              <CheckCircle2 className="w-4 h-4" /> 100% Cuma 99rb Sekali Bayar (Tanpa Biaya Bulanan)
             </span>
             <span className="flex items-center gap-1.5 text-emerald-400">
               <CheckCircle2 className="w-4 h-4" /> Offline Ready (Bisa Tanpa Internet)
@@ -581,7 +581,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
                     <div className="lg:col-span-7 space-y-4">
                       <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-amber-400/20 text-amber-300 text-[10px] font-bold">
-                        <Sparkles className="w-3.5 h-3.5" /> GEMINI AI INTELLIGENCE
+                        <Sparkles className="w-3.5 h-3.5" /> SMART AI INTELLIGENCE
                       </div>
                       <h3 className="text-xl font-bold text-slate-100">
                         Konsultasi AI Asisten Sembako Smart 24/7
@@ -603,7 +603,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                         <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-[11px]">
                           <div className="flex items-center gap-2">
                             <Sparkles className="w-4 h-4 text-amber-400" />
-                            <span className="font-extrabold text-amber-300">GEMINI AI ASISTEN</span>
+                            <span className="font-extrabold text-amber-300">SMART AI ASISTEN</span>
                           </div>
                           <span className="text-emerald-400 font-bold text-[10px] bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-md">
                             ONLINE
@@ -906,11 +906,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               </div>
               <h3 className="text-lg font-extrabold text-slate-100">AI Asisten Sembako Smart</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Fitur AI kecerdasan buatan Gemini yang dapat diajak berdiskusi tentang analisis tren barang terlaris, harga jual optimal, hingga saran restock belanja grosir.
+                Fitur AI kecerdasan buatan canggih yang dapat diajak berdiskusi tentang analisis tren barang terlaris, harga jual optimal, hingga saran restock belanja grosir.
               </p>
             </div>
             <div className="pt-2 flex items-center gap-2 text-xs text-amber-300 font-bold">
-              <CheckCircle className="w-4 h-4" /> Powered by Gemini AI
+              <CheckCircle className="w-4 h-4" /> Powered by Smart AI
             </div>
           </div>
 
@@ -1084,7 +1084,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <span>Pilihan Paket Lisensi Aplikasi</span>
           </div>
           <h2 className="text-3xl sm:text-4xl font-black text-slate-100">
-            Lisensi Sekali Bayar Cuma Rp 49.000, Tanpa Biaya Bulanan!
+            Lisensi Sekali Bayar Cuma Rp 99.000, Tanpa Biaya Bulanan!
           </h2>
           <p className="text-slate-400 text-sm">Promo spesial terbatas! Dapatkan akses seumur hidup untuk seluruh fitur kasir POS & AI Asisten.</p>
         </div>
@@ -1134,7 +1134,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* Package 2: PRO AI SMART (BEST SELLER) */}
           <div className="p-8 rounded-3xl bg-gradient-to-b from-emerald-950/60 via-slate-900 to-slate-950 border-2 border-emerald-500 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/10">
             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wider shadow-md whitespace-nowrap">
-              ★ PROMO TERBAIK - CUMA 49RB SEKALI BAYAR ★
+              ★ PROMO TERBAIK - CUMA 99RB SEKALI BAYAR ★
             </div>
 
             <div className="space-y-4 pt-2">
@@ -1147,7 +1147,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               <div className="space-y-1">
                 <span className="text-xs text-slate-500 line-through">Rp 499.000</span>
                 <div className="text-3xl font-black text-emerald-400 font-mono">
-                  Rp 49.000 <span className="text-xs font-sans text-slate-400 font-normal">/ Sekali Bayar</span>
+                  Rp 99.000 <span className="text-xs font-sans text-slate-400 font-normal">/ Sekali Bayar</span>
                 </div>
                 <p className="text-[11px] text-amber-300 font-bold">100% Bebas Biaya Bulanan / Tahunan!</p>
               </div>
@@ -1179,13 +1179,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
             <div className="space-y-2.5">
               <a
-                href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2049rb"
+                href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
               >
                 <MessageSquare className="w-4 h-4 fill-slate-950" />
-                <span>Beli Lisensi 49rb via WhatsApp</span>
+                <span>Beli Lisensi 99rb via WhatsApp</span>
               </a>
               <button
                 onClick={() => onNavigate('login')}
@@ -1328,7 +1328,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 relative z-10">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Harga Promo Cuma Rp 49.000 Sekali Bayar Selamanya!</span>
+            <span>Harga Promo Cuma Rp 99.000 Sekali Bayar Selamanya!</span>
           </div>
           <h2 className="text-3xl sm:text-5xl font-black text-slate-100">
             Siap Mengembangkan Toko Sembako Anda Hari Ini?
@@ -1345,13 +1345,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               <span>Coba Demo Instant (6 Jam Gratis)</span>
             </button>
             <a
-              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2049rb"
+              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-105"
             >
               <MessageSquare className="w-5 h-5 fill-slate-950" />
-              <span>Beli Lisensi 49rb via WhatsApp</span>
+              <span>Beli Lisensi 99rb via WhatsApp</span>
             </a>
           </div>
         </div>
@@ -1380,7 +1380,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
       {/* FLOATING WHATSAPP CUSTOMER SUPPORT BUTTON */}
       <a
-        href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20tanya%20paket%20lisensi%2049rb"
+        href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20tanya%20paket%20lisensi%2099rb"
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-2xl shadow-emerald-500/50 hover:scale-105 active:scale-95 transition-all cursor-pointer border-2 border-emerald-300"

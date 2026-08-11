@@ -297,7 +297,7 @@ export const demoActivityLogs: ActivityLog[] = [
     id: 'ACT-004',
     waktu: '1 Jam lalu',
     tipe: 'ai',
-    judul: 'Gemini AI Inventory Alert',
+    judul: 'Smart AI Inventory Alert',
     deskripsi: 'Stok MinyakKita Subsidi tersisa 4 pouch. Direkomendasikan segera reorder.',
     nilai: 'Peringatan Stok',
     status: 'warning',
