@@ -9,7 +9,7 @@ import { Modal } from '../components/Modal';
 import { subscribeProducts, addProduct, updateProduct, deleteProduct, clearAllDatabaseData, seedSampleProducts } from '../services/productService';
 import { subscribeSuppliers, seedSampleSuppliers } from '../services/supplierService';
 import { subscribeTransactions } from '../services/transaksiService';
-import { ProdukItem, TransaksiItem } from '../types';
+import { ProdukItem, TransaksiItem, PageId } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
 import { processImageFile } from '../utils/imageUtils';
 import { playScannerBeep } from '../utils/audioUtils';
@@ -107,14 +107,18 @@ const DEFAULT_CONFIG: StoreConfig = {
   scannerContinuousScan: true,
 };
 
-export const SettingPage: React.FC = () => {
+interface SettingPageProps {
+  onNavigate?: (page: PageId) => void;
+}
+
+export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
   const { profile, isDemoSession } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { success, warning, error: toastError, info } = useToast();
   const { storeConfig, updateStoreConfig, licenseInfo, activateLicenseKey, deactivateLicense } = useStore();
 
   // Active Tab State
-  const [activeTab, setActiveTab] = useState<'profil' | 'printer' | 'barcode' | 'lisensi' | 'panduan' | 'tema' | 'backup' | 'import' | 'reset' | 'tentang'>('profil');
+  const [activeTab, setActiveTab] = useState<'profil' | 'whatsapp' | 'printer' | 'barcode' | 'lisensi' | 'panduan' | 'tema' | 'backup' | 'import' | 'reset' | 'tentang'>('profil');
 
   // Tab Bar Horizontal Scroll Ref & Indicator State
   const scrollTabRef = useRef<HTMLDivElement>(null);
@@ -765,6 +769,7 @@ export const SettingPage: React.FC = () => {
         >
           {[
             { id: 'profil', label: 'Profil Toko', icon: Store },
+            { id: 'whatsapp', label: 'WhatsApp Bot & Notif', icon: MessageSquare },
             ...(!isDemoSession ? [{ id: 'lisensi', label: 'Lisensi Software', icon: KeyRound }] : []),
             { id: 'panduan', label: 'Panduan & Manual', icon: BookOpen },
             { id: 'printer', label: 'Printer Struk', icon: Printer },
@@ -1006,6 +1011,161 @@ export const SettingPage: React.FC = () => {
               </button>
             </div>
           </form>
+        </motion.div>
+      )}
+
+      {/* TAB WHATSAPP BOT & NOTIFIKASI */}
+      {activeTab === 'whatsapp' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl border border-emerald-500/20 shadow-xl space-y-6"
+        >
+          <div className="border-b border-slate-200 dark:border-slate-800 pb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Integrasi WhatsApp Bot, Input Katalog & Notifikasi Stok</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Kelola kirim rekap stok, input katalog dari chat WA, dan notifikasi stok menipis otomatis ke HP Pemilik Toko.
+              </p>
+            </div>
+            <span className="px-3 py-1 rounded-full text-xs font-black uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+              WA Integration Active
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Feature Card 1: Input Katalog */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950 via-slate-900 to-emerald-900 text-white space-y-3 border border-emerald-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                1
+              </div>
+              <h4 className="text-sm font-bold text-amber-300">Input Katalog via WhatsApp</h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Salin daftar produk dari pesan WhatsApp supplier/kasir, tempelkan di Parser Cerdas untuk otomatis diimpor ke database toko.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onNavigate) {
+                    onNavigate('stok');
+                  } else {
+                    info('Buka Halaman Stok', 'Klik tombol "WhatsApp Center" di bagian atas halaman Stok.');
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+              >
+                <span>Buka WhatsApp Parser di Halaman Stok &rarr;</span>
+              </button>
+            </div>
+
+            {/* Feature Card 2: Cek Stok */}
+            <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-3 border border-slate-800">
+              <div className="w-10 h-10 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold">
+                2
+              </div>
+              <h4 className="text-sm font-bold text-teal-300">Cek Stok Realtime via WA</h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Buat laporan rangkuman seluruh katalog atau produk spesifik dalam format rapi WhatsApp dengan 1-klik pengiriman.
+              </p>
+              <div className="text-[11px] font-mono text-amber-400 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                Perintah Bot: !stok, !cekstok, !stok beras
+              </div>
+            </div>
+
+            {/* Feature Card 3: Notifikasi Menipis */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-950 via-slate-900 to-rose-950 text-white space-y-3 border border-amber-500/30">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold">
+                3
+              </div>
+              <h4 className="text-sm font-bold text-rose-300">Alert Stok Menipis Otomatis</h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Sistem mengirimkan peringatan darurat langsung ke WhatsApp Admin saat stok berada di bawah batas minimum (minStok).
+              </p>
+              <div className="text-[11px] font-bold text-emerald-400 bg-slate-950 p-2 rounded-lg border border-slate-800 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Auto-Trigger Aktif
+              </div>
+            </div>
+          </div>
+
+          {/* Form Setup Nomor HP & Gateway */}
+          <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-4">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Konfigurasi Nomor HP Pemilik & Webhook WhatsApp Gateway
+            </h4>
+
+            {/* Webhook Endpoint Display */}
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-emerald-500/30 text-xs space-y-2 text-white">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-emerald-400 text-xs flex items-center gap-1.5">
+                  <MessageSquare className="w-4 h-4 text-amber-400" /> URL Webhook Server Aktif (HTTP POST):
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = `${window.location.origin}/api/whatsapp/webhook`;
+                    navigator.clipboard.writeText(url);
+                    info('Webhook Tersalin', 'URL Webhook disalin ke clipboard! Tempelkan di dashboard Fonnte/Wablas.');
+                  }}
+                  className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Salin URL Webhook</span>
+                </button>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 font-mono text-emerald-300 text-xs break-all">
+                {typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : 'https://domain-anda.com/api/whatsapp/webhook'}
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Copy-paste URL ini ke menu <strong>Webhook Settings / Callback URL</strong> pada Fonnte, Wablas, Whacenter, atau WhatsApp Gateway Anda agar pesan otomatis terproses secara realtime ke POS.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  No. WhatsApp Penerima Laporan & Alert Stok:
+                </label>
+                <input
+                  type="text"
+                  value={config.noHp}
+                  onChange={(e) => setConfig({ ...config, noHp: e.target.value })}
+                  placeholder="Contoh: 085187869164"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs text-slate-900 dark:text-white"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Nomor ini menjadi tujuan pengiriman laporan stok otomatis</p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  WhatsApp Gateway API Key (Fonnte / Wablas - Opsional):
+                </label>
+                <input
+                  type="password"
+                  defaultValue={localStorage.getItem('sembako_wa_gateway_token') || ''}
+                  onChange={(e) => localStorage.setItem('sembako_wa_gateway_token', e.target.value)}
+                  placeholder="Token Fonnte / Wablas / WA API"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs text-slate-900 dark:text-white"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Opsional untuk pengiriman pesan otomatis di latar belakang</p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  handleSaveConfig(config, 'Pengaturan WhatsApp Disimpan');
+                }}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 shadow-md cursor-pointer"
+              >
+                <Save className="w-4 h-4 text-amber-300" />
+                <span>Simpan Konfigurasi WhatsApp</span>
+              </button>
+            </div>
+          </div>
         </motion.div>
       )}
 

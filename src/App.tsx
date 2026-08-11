@@ -110,7 +110,7 @@ const MainAppContent: React.FC = () => {
       case 'ai-assistant':
         return <AIAssistantPage />;
       case 'setting':
-        return <SettingPage />;
+        return <SettingPage onNavigate={setCurrentPage} />;
       default:
         return <DashboardPage onNavigate={setCurrentPage} />;
     }

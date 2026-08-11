@@ -11,6 +11,7 @@ import {
 } from '../services/stockService';
 import { StockMovementModal } from '../components/StockMovementModal';
 import { StockOpnameModal } from '../components/StockOpnameModal';
+import { WhatsAppIntegrationModal } from '../components/WhatsAppIntegrationModal';
 import { TableSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../context/ToastContext';
 import {
@@ -40,7 +41,8 @@ import {
   Tag,
   DollarSign,
   ArrowUpDown,
-  Sparkles
+  Sparkles,
+  MessageSquare
 } from 'lucide-react';
 
 export const StokPage: React.FC = () => {
@@ -69,6 +71,8 @@ export const StokPage: React.FC = () => {
   // Modal States
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [isOpnameModalOpen, setIsOpnameModalOpen] = useState(false);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [waModalTab, setWaModalTab] = useState<'input' | 'cek' | 'notif'>('input');
   const [selectedProductForAction, setSelectedProductForAction] = useState<ProdukItem | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -310,6 +314,17 @@ export const StokPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => {
+              setWaModalTab('input');
+              setIsWhatsAppModalOpen(true);
+            }}
+            className="px-3.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer border border-emerald-300"
+          >
+            <MessageSquare className="w-4 h-4 fill-slate-950" />
+            <span>WhatsApp Center (Katalog, Stok & Notif)</span>
+          </button>
+
           <button
             onClick={() => {
               setSelectedProductForAction(null);
@@ -1061,6 +1076,14 @@ export const StokPage: React.FC = () => {
         preselectedProduct={selectedProductForAction}
         onSubmit={handleOpnameSubmit}
         isSubmitting={isSubmitting}
+      />
+
+      {/* Modal: WhatsApp Integration (Input Katalog, Cek Stok, Notifikasi Menipis) */}
+      <WhatsAppIntegrationModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        products={products}
+        defaultTab={waModalTab}
       />
 
     </div>

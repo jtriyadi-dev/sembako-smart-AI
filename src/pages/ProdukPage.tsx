@@ -11,6 +11,7 @@ import { ProductFormModal, KATEGORI_LIST } from '../components/ProductFormModal'
 import { ProductDeleteModal } from '../components/ProductDeleteModal';
 import { ProductCard } from '../components/ProductCard';
 import { BarcodeScannerModal } from '../components/BarcodeScannerModal';
+import { WhatsAppIntegrationModal } from '../components/WhatsAppIntegrationModal';
 import { TableSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../context/ToastContext';
 import {
@@ -35,7 +36,8 @@ import {
   Copy,
   Info,
   TrendingUp,
-  Sparkles
+  Sparkles,
+  MessageSquare
 } from 'lucide-react';
 
 export const ProdukPage: React.FC = () => {
@@ -64,6 +66,7 @@ export const ProdukPage: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<ProdukItem | null>(null);
   const [deletingProduct, setDeletingProduct] = useState<ProdukItem | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
 
   // Loading indicator for async actions
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -239,7 +242,16 @@ export const ProdukPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 self-start md:self-center">
+        <div className="flex items-center gap-2.5 self-start md:self-center flex-wrap">
+          <button
+            onClick={() => setIsWhatsAppModalOpen(true)}
+            className="px-3.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer border border-emerald-300"
+            title="Import Katalog & Notif WhatsApp"
+          >
+            <MessageSquare className="w-4 h-4 fill-slate-950" />
+            <span>Import WA / WhatsApp Center</span>
+          </button>
+
           <button
             onClick={() => setIsScannerOpen(true)}
             className="px-3 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
@@ -685,6 +697,14 @@ export const ProdukPage: React.FC = () => {
         onClose={() => setIsScannerOpen(false)}
         products={products}
         onSelectProduct={(product) => setEditingProduct(product)}
+      />
+
+      {/* Modal: WhatsApp Integration (Input Katalog, Cek Stok, Notifikasi Menipis) */}
+      <WhatsAppIntegrationModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        products={products}
+        defaultTab="input"
       />
 
     </div>
