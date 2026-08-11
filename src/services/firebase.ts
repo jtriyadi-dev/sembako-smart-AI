@@ -27,9 +27,9 @@ import {
   limit 
 } from 'firebase/firestore';
 
-// Set Firestore log level to 'error' to avoid noisy transient connection warnings
+// Set Firestore log level to 'silent' to prevent noisy connection warnings
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {
   // ignore if not supported
 }
@@ -57,7 +57,7 @@ const firebaseConfig = {
   appId: env.VITE_FIREBASE_APP_ID || jsonConfig.appId || '1:804065401730:web:b1b0002da06d566beecd9b',
 };
 
-const customDatabaseId = env.VITE_FIREBASE_DATABASE_ID || jsonConfig.firestoreDatabaseId || 'ai-studio-sembakosmartai-ada094f3-5601-4d8c-af90-8e0080090750';
+const customDatabaseId = env.VITE_FIREBASE_DATABASE_ID || jsonConfig.firestoreDatabaseId;
 
 // Initialize Firebase app once
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -65,9 +65,9 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Initialize Auth
 export const auth = getAuth(app);
 
-// Initialize Firestore (using custom database ID if specified in config)
-export const db = customDatabaseId && customDatabaseId !== ''
-  ? getFirestore(app, customDatabaseId)
+// Initialize Firestore (using default database unless custom database ID is explicitly provided in config)
+export const db = customDatabaseId && customDatabaseId.trim() !== ''
+  ? getFirestore(app, customDatabaseId.trim())
   : getFirestore(app);
 
 // Enable Firestore offline persistence (IndexedDB local cache)

@@ -8,19 +8,21 @@ export default async function handler(req: any, res: any) {
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
   );
 
+  const method = (req.method || 'GET').toUpperCase();
+
   // 1. Handle OPTIONS Preflight request
-  if (req.method === 'OPTIONS') {
+  if (method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   // 2. Handle GET Request (Webhook URL testing / verification)
-  if (req.method === 'GET') {
+  if (method === 'GET') {
     const hubChallenge = req.query ? req.query['hub.challenge'] : null;
     if (hubChallenge) {
       return res.status(200).send(String(hubChallenge));
     }
     return res.status(200).json({
-      status: 'active',
+      status: true,
       message: 'WhatsApp Webhook Endpoint POS Toko Sembako Siap Menerima HTTP POST',
       documentation: 'Kirim HTTP POST ke endpoint ini dengan payload JSON/Form dari Fonnte, Wablas, Whacenter, atau Custom Bot.',
       supportedFormat: 'PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok'
@@ -28,17 +30,24 @@ export default async function handler(req: any, res: any) {
   }
 
   // 3. Handle POST Request (WhatsApp Bot Message Payload)
-  if (req.method === 'POST') {
+  if (method === 'POST') {
     try {
-      const body = req.body || {};
-      
+      let body = req.body || {};
+      if (typeof body === 'string') {
+        try {
+          body = JSON.parse(body);
+        } catch (e) {
+          body = { text: body };
+        }
+      }
+
       // Extract sender and message text from various WA Gateway formats (Fonnte, Wablas, Whacenter, UltraMsg, etc)
       const sender = body.sender || body.from || body.phone || body.wa_number || body.pushName || 'WhatsApp User';
       const messageText = (body.message || body.text || body.body || body.caption || body.payload || '').toString().trim();
 
       if (!messageText) {
         return res.status(200).json({
-          status: 'success',
+          status: true,
           detail: 'Pesan diterima (kosong/non-teks)'
         });
       }
@@ -49,7 +58,7 @@ export default async function handler(req: any, res: any) {
       if (isProductFormat) {
         const parts = messageText.split('#').map((p: string) => p.trim());
         const startIndex = parts[0].toUpperCase() === 'PRODUK' ? 1 : 0;
-        
+
         const nama = parts[startIndex] || 'Produk WA Bot';
         const kategori = parts[startIndex + 1] || 'Sembako & Bumbu';
         const hargaBeli = parseInt(parts[startIndex + 2]?.replace(/\D/g, '') || '10000', 10);
@@ -78,7 +87,7 @@ export default async function handler(req: any, res: any) {
         };
 
         return res.status(200).json({
-          status: 'success',
+          status: true,
           detail: `Berhasil memproses produk "${nama}"`,
           data: newProduct,
           reply: `✅ [POS Toko Sembako] Produk "${nama}" berhasil ditambahkan ke katalog toko dengan stok ${stok} ${satuan}!`
@@ -88,7 +97,7 @@ export default async function handler(req: any, res: any) {
       // Check for !stok command
       if (messageText.toLowerCase().startsWith('!stok') || messageText.toLowerCase().startsWith('!cekstok')) {
         return res.status(200).json({
-          status: 'success',
+          status: true,
           detail: 'Perintah !stok diproses',
           reply: '📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif. Silakan gunakan dashboard POS untuk melihat laporan lengkap.'
         });
@@ -96,18 +105,18 @@ export default async function handler(req: any, res: any) {
 
       // Default response
       return res.status(200).json({
-        status: 'received',
+        status: true,
         detail: 'Pesan diterima tetapi tidak memicu kata kunci khusus',
         help: 'Gunakan format PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok untuk menambah produk.'
       });
     } catch (err: any) {
-      return res.status(500).json({
-        status: 'error',
+      return res.status(200).json({
+        status: false,
         message: err?.message || 'Internal Webhook Error'
       });
     }
   }
 
-  // Method not supported
-  return res.status(405).json({ error: 'Method Not Allowed' });
+  // Fallback for any other HTTP method
+  return res.status(200).json({ status: true, message: 'Webhook endpoint active' });
 }
