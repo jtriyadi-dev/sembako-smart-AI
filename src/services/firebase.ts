@@ -70,16 +70,8 @@ export const db = customDatabaseId && customDatabaseId.trim() !== ''
   ? getFirestore(app, customDatabaseId.trim())
   : getFirestore(app);
 
-// Enable Firestore offline persistence (IndexedDB local cache)
-if (typeof window !== 'undefined') {
-  enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-      console.warn('Firestore offline persistence: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-      console.warn('Firestore offline persistence: Browser does not support IndexedDB');
-    }
-  });
-}
+// Enable Firestore offline persistence (Disabled to prevent multi-tab IndexedDB locks and 60-second connection hangs in iFrames)
+// if (typeof window !== 'undefined') { ... }
 
 // Auth Service Helpers
 export const googleProvider = new GoogleAuthProvider();

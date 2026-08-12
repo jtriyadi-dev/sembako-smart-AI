@@ -14,7 +14,6 @@ export interface ProductInput {
   sender?: string;
 }
 
-// Helper to extract field value from Firestore REST document
 function parseFirestoreField(fieldObj: any): any {
   if (!fieldObj) return null;
   if ('stringValue' in fieldObj) return fieldObj.stringValue;
@@ -24,7 +23,6 @@ function parseFirestoreField(fieldObj: any): any {
   return null;
 }
 
-// Helper to convert plain JS object to Firestore REST fields format
 function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
   const fields: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
@@ -39,14 +37,32 @@ function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
   return fields;
 }
 
+function isProductMatch(docNama: string, searchInput: string): boolean {
+  if (!docNama || !searchInput) return false;
+  const d = docNama.trim().toLowerCase();
+  const s = searchInput.trim().toLowerCase();
+
+  if (d === s) return true;
+
+  const cleanD = d.replace(/[^a-z0-9]/g, '');
+  const cleanS = s.replace(/[^a-z0-9]/g, '');
+  if (cleanD && cleanS && cleanD === cleanS) return true;
+
+  if (cleanD.length >= 4 && cleanS.length >= 4) {
+    if (cleanD.includes(cleanS) || cleanS.includes(cleanD)) return true;
+  }
+
+  return false;
+}
+
 export async function processProductWebhook(input: ProductInput): Promise<{ message: string; updatedStock: number; isNew: boolean }> {
   try {
-    const targetName = input.nama.trim().toLowerCase();
+    const targetName = input.nama.trim();
     const now = new Date().toISOString();
 
-    // 1. Fetch existing products list from Firestore REST API
     let existingDocId: string | null = null;
     let existingProduct: any = null;
+    let rawDocFields: any = null;
 
     try {
       const getUrl = `${BASE_FIRESTORE_URL}/products?key=${FIREBASE_API_KEY}`;
@@ -58,18 +74,15 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
         for (const doc of docs) {
           const fields = doc.fields || {};
           const docNama = parseFirestoreField(fields.nama) || '';
-          if (docNama.trim().toLowerCase() === targetName) {
-            // Found matching product!
+          if (isProductMatch(docNama, targetName)) {
             const docPath = doc.name || '';
             existingDocId = docPath.split('/').pop() || null;
             existingProduct = {
               nama: docNama,
               stok: parseFirestoreField(fields.stok) || 0,
               satuan: parseFirestoreField(fields.satuan) || 'Pcs',
-              hargaBeli: parseFirestoreField(fields.hargaBeli) || 0,
-              hargaJual: parseFirestoreField(fields.hargaJual) || 0,
-              kategori: parseFirestoreField(fields.kategori) || 'Sembako & Bumbu',
             };
+            rawDocFields = fields;
             break;
           }
         }
@@ -78,25 +91,40 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
       console.warn('Firestore GET products fetch warning:', e);
     }
 
-    if (existingDocId && existingProduct) {
-      // 2A. PRODUCT EXISTS -> UPDATE / ADD STOK
+    if (existingDocId && existingProduct && rawDocFields) {
       const oldStock = Number(existingProduct.stok) || 0;
       const addedStock = Number(input.stok) || 0;
       const newTotalStock = oldStock + addedStock;
 
-      const patchUrl = `${BASE_FIRESTORE_URL}/products/${existingDocId}?updateMask.fieldPaths=stok&updateMask.fieldPaths=updatedAt&key=${FIREBASE_API_KEY}`;
-      
+      const updatedFields: Record<string, any> = {
+        ...rawDocFields,
+        stok: { integerValue: String(newTotalStock) },
+        updatedAt: { stringValue: now }
+      };
+
+      if (input.hargaBeli && input.hargaBeli > 0) {
+        updatedFields.hargaBeli = { integerValue: String(input.hargaBeli) };
+      }
+      if (input.hargaJual && input.hargaJual > 0) {
+        updatedFields.hargaJual = { integerValue: String(input.hargaJual) };
+      }
+      if (input.kategori && input.kategori !== 'Sembako & Bumbu') {
+        updatedFields.kategori = { stringValue: input.kategori };
+      }
+      if (input.satuan && input.satuan !== 'Pcs') {
+        updatedFields.satuan = { stringValue: input.satuan };
+      }
+
+      const patchUrl = `${BASE_FIRESTORE_URL}/products/${existingDocId}?key=${FIREBASE_API_KEY}`;
       try {
-        await fetch(patchUrl, {
+        const patchRes = await fetch(patchUrl, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: {
-              stok: { integerValue: String(newTotalStock) },
-              updatedAt: { stringValue: now }
-            }
-          })
+          body: JSON.stringify({ fields: updatedFields })
         });
+        if (!patchRes.ok) {
+          console.error('Firestore PATCH failed:', patchRes.status, await patchRes.text());
+        }
       } catch (e) {
         console.warn('Firestore PATCH product error:', e);
       }
@@ -124,7 +152,7 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
         console.warn('Log stock movement error:', e);
       }
 
-      const satuanStr = input.satuan || existingProduct.satuan || 'pouch';
+      const satuanStr = input.satuan || existingProduct.satuan || 'Pcs';
       const msg = `✅ [POS Toko Sembako] Stok "${existingProduct.nama || input.nama}" BERHASIL DITAMBAHKAN!\n\n` +
                   `📦 Stok Awal: ${oldStock} ${satuanStr}\n` +
                   `➕ Tambahan: +${addedStock} ${satuanStr}\n` +
@@ -137,7 +165,6 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
       };
 
     } else {
-      // 2B. PRODUCT DOES NOT EXIST -> CREATE NEW PRODUCT
       const sku = `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
       const barcode = `${Math.floor(8990000000000 + Math.random() * 9999999)}`;
       const hargaBeli = input.hargaBeli || 10000;
@@ -167,14 +194,16 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
       let newDocId = `prod-${Date.now()}`;
       try {
         const postUrl = `${BASE_FIRESTORE_URL}/products?key=${FIREBASE_API_KEY}`;
-        const res = await fetch(postUrl, {
+        const postRes = await fetch(postUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fields: newProdFields })
         });
-        if (res.ok) {
-          const resData = await res.json();
+        if (postRes.ok) {
+          const resData = await postRes.json();
           newDocId = (resData.name || '').split('/').pop() || newDocId;
+        } else {
+          console.error('Firestore POST failed:', postRes.status, await postRes.text());
         }
       } catch (e) {
         console.warn('Firestore POST new product error:', e);
@@ -214,7 +243,6 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
 
   } catch (err: any) {
     console.error('Error in processProductWebhook REST:', err);
-    // Fallback response so webhook NEVER throws 500
     const satuanStr = input.satuan || 'Pcs';
     return {
       message: `✅ [POS Toko Sembako] Produk "${input.nama}" berhasil diproses dengan stok ${input.stok} ${satuanStr}!`,

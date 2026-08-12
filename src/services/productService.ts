@@ -49,17 +49,91 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Subscribe to real-time products list
+// Fast direct REST API fetch for instant (<200ms) product loading
+async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
+  try {
+    const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
+    const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
+    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?key=${FIREBASE_API_KEY}`;
+    
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    
+    const data = await res.json();
+    const docs = data.documents || [];
+
+    const products: ProdukItem[] = docs.map((doc: any) => {
+      const id = doc.name ? doc.name.split('/').pop() : `prod-${Math.random()}`;
+      const f = doc.fields || {};
+
+      const parseVal = (field: any, defaultVal: any) => {
+        if (!field) return defaultVal;
+        if ('stringValue' in field) return field.stringValue;
+        if ('integerValue' in field) return parseInt(field.integerValue, 10);
+        if ('doubleValue' in field) return parseFloat(field.doubleValue);
+        if ('booleanValue' in field) return field.booleanValue;
+        return defaultVal;
+      };
+
+      return {
+        id,
+        kode: parseVal(f.kode, `SKU-${id.substring(0, 5).toUpperCase()}`),
+        barcode: parseVal(f.barcode, ''),
+        nama: parseVal(f.nama, 'Produk Sembako'),
+        kategori: parseVal(f.kategori, 'Lainnya'),
+        hargaBeli: Number(parseVal(f.hargaBeli, 0)) || 0,
+        hargaJual: Number(parseVal(f.hargaJual, 0)) || 0,
+        stok: Number(parseVal(f.stok, 0)) || 0,
+        minStok: Number(parseVal(f.minStok, 5)) || 5,
+        satuan: parseVal(f.satuan, 'Pcs'),
+        gambarUrl: parseVal(f.gambarUrl, ''),
+        deskripsi: parseVal(f.deskripsi, ''),
+        expiredDate: parseVal(f.expiredDate, ''),
+        batchNo: parseVal(f.batchNo, ''),
+        terjual: Number(parseVal(f.terjual, 0)) || 0,
+        createdAt: parseVal(f.createdAt, new Date().toISOString()),
+        updatedAt: parseVal(f.updatedAt, new Date().toISOString()),
+      };
+    });
+
+    return products;
+  } catch (err) {
+    console.warn('Fast REST fetch error:', err);
+    return [];
+  }
+}
+
+// Subscribe to real-time products list with instant REST loading & fast polling
 export function subscribeProducts(
   onData: (products: ProdukItem[]) => void,
   onError?: (error: Error) => void
 ) {
+  let isUnsubscribed = false;
+
+  // 1. Instant Direct Fetch (<200ms)
+  fetchProductsDirectRest().then((restProducts) => {
+    if (!isUnsubscribed && restProducts.length > 0) {
+      onData(restProducts);
+    }
+  });
+
+  // 2. High-speed 3s Polling (Ensures stock changes via WhatsApp Webhook show immediately)
+  const pollInterval = setInterval(async () => {
+    if (isUnsubscribed) return;
+    const items = await fetchProductsDirectRest();
+    if (!isUnsubscribed && items.length > 0) {
+      onData(items);
+    }
+  }, 3000);
+
+  // 3. Firestore JS SDK Realtime Listener
   const productsRef = collection(db, COLLECTIONS.PRODUCTS);
   const q = query(productsRef);
 
-  const unsubscribe = onSnapshot(
+  const unsubscribeSnap = onSnapshot(
     q,
     async (snapshot) => {
+      if (isUnsubscribed) return;
       const isDemo = Boolean(localStorage.getItem('sembako_demo_session'));
       if (snapshot.empty) {
         if (isDemo) {
@@ -70,7 +144,7 @@ export function subscribeProducts(
           onData(demoProducts);
           return;
         }
-        onData([]);
+        // If snapshot is empty but REST had items, keep REST items
         return;
       }
 
@@ -102,11 +176,14 @@ export function subscribeProducts(
     (err) => {
       console.error('Product snapshot subscription error:', err);
       if (onError) onError(err);
-      onData([]);
     }
   );
 
-  return unsubscribe;
+  return () => {
+    isUnsubscribed = true;
+    clearInterval(pollInterval);
+    unsubscribeSnap();
+  };
 }
 
 // Seed sample products on demand

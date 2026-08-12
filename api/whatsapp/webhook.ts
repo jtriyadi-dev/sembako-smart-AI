@@ -26,6 +26,27 @@ function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
   return fields;
 }
 
+function isProductMatch(docNama: string, searchInput: string): boolean {
+  if (!docNama || !searchInput) return false;
+  const d = docNama.trim().toLowerCase();
+  const s = searchInput.trim().toLowerCase();
+
+  // 1. Exact match
+  if (d === s) return true;
+
+  // 2. Cleaned alphanumeric match (e.g. "minyak bimoli 2l" === "minyak bimoli 2 l")
+  const cleanD = d.replace(/[^a-z0-9]/g, '');
+  const cleanS = s.replace(/[^a-z0-9]/g, '');
+  if (cleanD && cleanS && cleanD === cleanS) return true;
+
+  // 3. Substring match for substantial names
+  if (cleanD.length >= 4 && cleanS.length >= 4) {
+    if (cleanD.includes(cleanS) || cleanS.includes(cleanD)) return true;
+  }
+
+  return false;
+}
+
 async function processProductInFirestore(input: {
   nama: string;
   kategori?: string;
@@ -37,12 +58,14 @@ async function processProductInFirestore(input: {
   sender?: string;
 }): Promise<string> {
   try {
-    const targetName = input.nama.trim().toLowerCase();
+    const targetName = input.nama.trim();
     const now = new Date().toISOString();
 
     let existingDocId: string | null = null;
     let existingProduct: any = null;
+    let rawDocFields: any = null;
 
+    // 1. Fetch current products list from Firestore REST
     try {
       const getUrl = `${BASE_FIRESTORE_URL}/products?key=${FIREBASE_API_KEY}`;
       const res = await fetch(getUrl);
@@ -53,7 +76,7 @@ async function processProductInFirestore(input: {
         for (const doc of docs) {
           const fields = doc.fields || {};
           const docNama = parseFirestoreField(fields.nama) || '';
-          if (docNama.trim().toLowerCase() === targetName) {
+          if (isProductMatch(docNama, targetName)) {
             const docPath = doc.name || '';
             existingDocId = docPath.split('/').pop() || null;
             existingProduct = {
@@ -61,42 +84,85 @@ async function processProductInFirestore(input: {
               stok: parseFirestoreField(fields.stok) || 0,
               satuan: parseFirestoreField(fields.satuan) || 'Pcs',
             };
+            rawDocFields = fields;
             break;
           }
         }
       }
     } catch (e) {
-      console.warn('Firestore fetch warning:', e);
+      console.warn('Firestore GET products warning:', e);
     }
 
-    if (existingDocId && existingProduct) {
+    if (existingDocId && existingProduct && rawDocFields) {
+      // 2A. EXIST -> ADD TO EXISTING STOCK
       const oldStock = Number(existingProduct.stok) || 0;
       const addedStock = Number(input.stok) || 0;
       const newTotalStock = oldStock + addedStock;
 
-      const patchUrl = `${BASE_FIRESTORE_URL}/products/${existingDocId}?updateMask.fieldPaths=stok&updateMask.fieldPaths=updatedAt&key=${FIREBASE_API_KEY}`;
-      
+      const updatedFields: Record<string, any> = {
+        ...rawDocFields,
+        stok: { integerValue: String(newTotalStock) },
+        updatedAt: { stringValue: now }
+      };
+
+      if (input.hargaBeli && input.hargaBeli > 0) {
+        updatedFields.hargaBeli = { integerValue: String(input.hargaBeli) };
+      }
+      if (input.hargaJual && input.hargaJual > 0) {
+        updatedFields.hargaJual = { integerValue: String(input.hargaJual) };
+      }
+      if (input.kategori && input.kategori !== 'Sembako & Bumbu') {
+        updatedFields.kategori = { stringValue: input.kategori };
+      }
+      if (input.satuan && input.satuan !== 'Pcs') {
+        updatedFields.satuan = { stringValue: input.satuan };
+      }
+
+      const patchUrl = `${BASE_FIRESTORE_URL}/products/${existingDocId}?key=${FIREBASE_API_KEY}`;
       try {
-        await fetch(patchUrl, {
+        const patchRes = await fetch(patchUrl, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: updatedFields })
+        });
+        if (!patchRes.ok) {
+          console.error('Firestore PATCH failed:', patchRes.status, await patchRes.text());
+        }
+      } catch (e) {
+        console.warn('Firestore PATCH exception:', e);
+      }
+
+      // Log movement
+      try {
+        const logUrl = `${BASE_FIRESTORE_URL}/stock_movements?key=${FIREBASE_API_KEY}`;
+        await fetch(logUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            fields: {
-              stok: { integerValue: String(newTotalStock) },
-              updatedAt: { stringValue: now }
-            }
+            fields: toFirestoreFields({
+              productId: existingDocId,
+              productNama: existingProduct.nama || input.nama,
+              tipe: 'MASUK',
+              jumlah: addedStock,
+              stokSebelum: oldStock,
+              stokSesudah: newTotalStock,
+              keterangan: `Tambahan Stok via WA Webhook (${input.sender || 'WhatsApp'})`,
+              createdAt: now
+            })
           })
         });
       } catch (e) {
-        console.warn('Firestore PATCH error:', e);
+        console.warn('Log movement exception:', e);
       }
 
-      const satuanStr = input.satuan || existingProduct.satuan || 'pouch';
+      const satuanStr = input.satuan || existingProduct.satuan || 'Pcs';
       return `✅ [POS Toko Sembako] Stok "${existingProduct.nama || input.nama}" BERHASIL DITAMBAHKAN!\n\n` +
              `📦 Stok Awal: ${oldStock} ${satuanStr}\n` +
              `➕ Tambahan: +${addedStock} ${satuanStr}\n` +
              `📊 Total Stok Sekarang: ${newTotalStock} ${satuanStr}`;
+
     } else {
+      // 2B. CREATE NEW PRODUCT IN FIRESTORE
       const sku = `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
       const barcode = `${Math.floor(8990000000000 + Math.random() * 9999999)}`;
       const hargaBeli = input.hargaBeli || 10000;
@@ -123,20 +189,51 @@ async function processProductInFirestore(input: {
         updatedAt: now
       });
 
+      let newDocId = `prod-${Date.now()}`;
       try {
         const postUrl = `${BASE_FIRESTORE_URL}/products?key=${FIREBASE_API_KEY}`;
-        await fetch(postUrl, {
+        const postRes = await fetch(postUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fields: newProdFields })
         });
+        if (postRes.ok) {
+          const resData = await postRes.json();
+          newDocId = (resData.name || '').split('/').pop() || newDocId;
+        } else {
+          console.error('Firestore POST failed:', postRes.status, await postRes.text());
+        }
       } catch (e) {
-        console.warn('Firestore POST error:', e);
+        console.warn('Firestore POST exception:', e);
+      }
+
+      // Log movement
+      try {
+        const logUrl = `${BASE_FIRESTORE_URL}/stock_movements?key=${FIREBASE_API_KEY}`;
+        await fetch(logUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: toFirestoreFields({
+              productId: newDocId,
+              productNama: input.nama,
+              tipe: 'MASUK',
+              jumlah: input.stok,
+              stokSebelum: 0,
+              stokSesudah: input.stok,
+              keterangan: `Stok Awal Produk Baru via WA Webhook (${input.sender || 'WhatsApp'})`,
+              createdAt: now
+            })
+          })
+        });
+      } catch (e) {
+        console.warn('Log movement exception:', e);
       }
 
       return `✅ [POS Toko Sembako] Produk baru "${input.nama}" BERHASIL DITAMBAHKAN ke katalog toko dengan stok awal ${input.stok} ${satuan}!`;
     }
   } catch (err: any) {
+    console.error('processProductInFirestore Error:', err);
     const satuanStr = input.satuan || 'Pcs';
     return `✅ [POS Toko Sembako] Produk "${input.nama}" berhasil diproses dengan stok ${input.stok} ${satuanStr}!`;
   }
@@ -155,12 +252,10 @@ export default async function handler(req: any, res: any) {
 
     const method = (req.method || 'GET').toUpperCase();
 
-    // 1. OPTIONS Preflight
     if (method === 'OPTIONS') {
       return res.status(200).end();
     }
 
-    // 2. GET Request (Webhook URL test / status check)
     if (method === 'GET') {
       const hubChallenge = req.query ? req.query['hub.challenge'] : null;
       if (hubChallenge) {
@@ -176,7 +271,6 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 3. POST Request (WhatsApp Message Payload)
     let body = req.body || {};
     if (typeof body === 'string') {
       try {
@@ -206,7 +300,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Command: STOK#Nama#Jumlah
+    // Command: STOK#Nama#Jumlah (or TAMBAHSTOK#Nama#Jumlah)
     const isStockOnlyCmd = (messageText.toUpperCase().startsWith('STOK#') || messageText.toUpperCase().startsWith('TAMBAHSTOK#')) && messageText.includes('#');
     if (isStockOnlyCmd) {
       const parts = messageText.split('#').map((p: string) => p.trim());
@@ -261,7 +355,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({
         data: [
           {
-            message: '📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif. Silakan gunakan dashboard POS untuk melihat laporan lengkap.'
+            message: '📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif.'
           }
         ]
       });
