@@ -1,7 +1,12 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { processProductWebhook, processStockUpdateWebhook } from "./src/services/backendStore";
+import { 
+  processProductWebhook, 
+  processStockUpdateWebhook, 
+  getProductsBackend, 
+  saveProductBackend 
+} from "./src/services/backendStore";
 
 interface WebhookLog {
   id: string;
@@ -41,6 +46,22 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // GET /api/products - Direct Fast REST Endpoint for Products List
+  app.get("/api/products", (req, res) => {
+    const products = getProductsBackend();
+    res.json({ status: "ok", count: products.length, products });
+  });
+
+  // POST /api/products - Save or update product directly
+  app.post("/api/products", (req, res) => {
+    const prod = req.body;
+    if (!prod || !prod.nama) {
+      return res.status(400).json({ error: "Nama produk wajib diisi" });
+    }
+    const saved = saveProductBackend(prod);
+    res.json({ status: "ok", product: saved });
+  });
+
   // GET /api/whatsapp/webhook - Verification endpoint for Webhook Setup
   app.get("/api/whatsapp/webhook", (req, res) => {
     const hubChallenge = req.query["hub.challenge"];
@@ -60,11 +81,18 @@ async function startServer() {
   // POST /api/whatsapp/webhook - Primary Webhook Listener
   app.post("/api/whatsapp/webhook", async (req, res) => {
     try {
-      const body = req.body || {};
+      let body = req.body || {};
+
+      // If array e.g. [{ message: "...", phone: "..." }]
+      if (Array.isArray(body) && body.length > 0) {
+        body = body[0];
+      } else if (body && Array.isArray(body.data) && body.data.length > 0) {
+        body = body.data[0];
+      }
       
       // Extract sender and message text from various WA Gateway formats
-      const sender = body.sender || body.from || body.phone || body.wa_number || body.pushName || "WhatsApp User";
-      const messageText = (body.message || body.text || body.body || body.caption || body.payload || "").toString().trim();
+      const sender = body.sender || body.from || body.phone || body.wa_number || body.number || body.pushName || "WhatsApp User";
+      const messageText = (body.message || body.text || body.body || body.caption || body.payload || body.pesan || "").toString().trim();
 
       console.log(`[WhatsApp Webhook Received] From: ${sender} | Message: "${messageText}"`);
 
@@ -98,7 +126,7 @@ async function startServer() {
           rawBody: body,
           messageText,
           status: "success",
-          actionTaken: `Update stok "${nama}" sebesar +${addedStock} berhasil diproses di Firestore`
+          actionTaken: `Update stok "${nama}" sebesar +${addedStock} berhasil diproses`
         };
         recentWebhooks.unshift(logItem);
 

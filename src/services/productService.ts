@@ -49,12 +49,26 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Fast direct REST API fetch for instant (<200ms) product loading
+// Fast direct REST API fetch for instant (<100ms) product loading from Server + Firestore
 async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
   try {
+    // 1. Try local Express API endpoint first
+    try {
+      const serverRes = await fetch('/api/products');
+      if (serverRes.ok) {
+        const data = await serverRes.json();
+        if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+          return data.products;
+        }
+      }
+    } catch (e) {
+      // ignore if local API unavailable
+    }
+
+    // 2. Fallback to Firestore REST API
     const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
     const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?key=${FIREBASE_API_KEY}`;
+    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?pageSize=300&key=${FIREBASE_API_KEY}`;
     
     const res = await fetch(url);
     if (!res.ok) return [];
