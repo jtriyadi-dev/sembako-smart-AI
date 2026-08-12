@@ -90,23 +90,61 @@ export default async function handler(req: any, res: any) {
 
     let replyMsg = '';
 
-    // 5. Command STOK# (Tambah stok produk yang ada)
+    // Fetch live products from Cloud Sync
+    const products = await fetchCloudProducts();
+
+    // 5. Command STOK# (Tambah stok produk)
     const isStockOnlyCmd = (messageText.toUpperCase().startsWith('STOK#') || messageText.toUpperCase().startsWith('TAMBAHSTOK#')) && messageText.includes('#');
     if (isStockOnlyCmd) {
       const parts = messageText.split('#').map((p: string) => p.trim());
       const nama = parts[1] || 'Produk';
       const addedStock = parseInt(parts[2]?.replace(/\D/g, '') || '0', 10);
 
-      // Execute Firestore REST sync (if available)
-      await updateFirestoreProductStock(nama, addedStock, sender).catch(() => {});
+      const { product: matchedProduct, index: matchedIndex } = findMatchingProductInList(nama, products);
 
-      replyMsg = `✅ [POS Toko Sembako] Stok "${nama}" BERHASIL DITAMBAHKAN!\n\n` +
-                 `📦 Tambahan Stok: +${addedStock}\n` +
-                 `📱 Pengirim: ${sender}\n` +
-                 `📊 Status: Stok di sistem POS Toko Sembako berhasil diperbarui.`;
+      if (matchedProduct && matchedIndex >= 0) {
+        const oldStock = Number(matchedProduct.stok) || 0;
+        const newTotalStock = oldStock + addedStock;
+        const satuanStr = matchedProduct.satuan || 'Pcs';
+
+        products[matchedIndex].stok = newTotalStock;
+        products[matchedIndex].updatedAt = new Date().toISOString();
+
+        await saveCloudProducts(products);
+
+        replyMsg = `✅ [POS Toko Sembako] Stok "${matchedProduct.nama}" BERHASIL DITAMBAHKAN!\n\n` +
+                   `📦 Stok Awal: ${oldStock} ${satuanStr}\n` +
+                   `➕ Tambahan: +${addedStock} ${satuanStr}\n` +
+                   `📊 Total Stok Sekarang: ${newTotalStock} ${satuanStr}`;
+      } else {
+        // Create new product if not found
+        const newProd = {
+          id: `prod-${Date.now()}`,
+          kode: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
+          barcode: `${Math.floor(8990000000000 + Math.random() * 9999999)}`,
+          nama: nama,
+          kategori: 'Sembako Utama',
+          hargaBeli: 10000,
+          hargaJual: 12000,
+          stok: addedStock,
+          minStok: 5,
+          satuan: 'Pcs',
+          gambarUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400',
+          deskripsi: `Diimpor otomatis via WA (${sender})`,
+          terjual: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        products.unshift(newProd);
+        await saveCloudProducts(products);
+
+        replyMsg = `✅ [POS Toko Sembako] Produk baru "${nama}" BERHASIL DITAMBAHKAN!\n\n` +
+                   `📦 Stok Awal: ${addedStock} Pcs\n` +
+                   `📊 Total Stok Sekarang: ${addedStock} Pcs`;
+      }
     } 
-    // 6. Command PRODUK# (Tambah produk baru)
-    else if (messageText.toUpperCase().startsWith('PRODUK#') || messageText.includes('#')) {
+    // 6. Command PRODUK# (Tambah/Update produk baru)
+    else if (messageText.toUpperCase().startsWith('PRODUK#') || (messageText.includes('#') && messageText.split('#').length >= 3)) {
       const parts = messageText.split('#').map((p: string) => p.trim());
       const startIndex = parts[0].toUpperCase() === 'PRODUK' ? 1 : 0;
 
@@ -117,13 +155,52 @@ export default async function handler(req: any, res: any) {
       const stok = parseInt(parts[startIndex + 4]?.replace(/\D/g, '') || '10', 10);
       const satuan = parts[startIndex + 5] || 'Pcs';
 
-      // Execute Firestore REST sync (if available)
-      await createFirestoreProduct(nama, kategori, hargaBeli, hargaJual, stok, satuan, sender).catch(() => {});
+      const { product: matchedProduct, index: matchedIndex } = findMatchingProductInList(nama, products);
 
-      replyMsg = `✅ [POS Toko Sembako] Produk baru "${nama}" BERHASIL DITAMBAHKAN ke katalog toko!\n\n` +
-                 `📦 Stok Awal: ${stok} ${satuan}\n` +
-                 `💰 Harga Jual: Rp ${hargaJual.toLocaleString('id-ID')}\n` +
-                 `🏷️ Kategori: ${kategori}`;
+      if (matchedProduct && matchedIndex >= 0) {
+        const oldStock = Number(matchedProduct.stok) || 0;
+        const newTotalStock = oldStock + stok;
+
+        products[matchedIndex].stok = newTotalStock;
+        if (hargaBeli > 0) products[matchedIndex].hargaBeli = hargaBeli;
+        if (hargaJual > 0) products[matchedIndex].hargaJual = hargaJual;
+        if (kategori) products[matchedIndex].kategori = kategori;
+        if (satuan) products[matchedIndex].satuan = satuan;
+        products[matchedIndex].updatedAt = new Date().toISOString();
+
+        await saveCloudProducts(products);
+
+        replyMsg = `✅ [POS Toko Sembako] Produk "${matchedProduct.nama}" BERHASIL DIPERBARUI!\n\n` +
+                   `📦 Stok Awal: ${oldStock} ${satuan}\n` +
+                   `➕ Tambahan Stok: +${stok} ${satuan}\n` +
+                   `📊 Total Stok Sekarang: ${newTotalStock} ${satuan}\n` +
+                   `💰 Harga Jual: Rp ${hargaJual.toLocaleString('id-ID')}`;
+      } else {
+        const newProd = {
+          id: `prod-${Date.now()}`,
+          kode: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
+          barcode: `${Math.floor(8990000000000 + Math.random() * 9999999)}`,
+          nama: nama,
+          kategori: kategori,
+          hargaBeli: hargaBeli,
+          hargaJual: hargaJual,
+          stok: stok,
+          minStok: 5,
+          satuan: satuan,
+          gambarUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400',
+          deskripsi: `Diimpor otomatis via WA (${sender})`,
+          terjual: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        products.unshift(newProd);
+        await saveCloudProducts(products);
+
+        replyMsg = `✅ [POS Toko Sembako] Produk baru "${nama}" BERHASIL DITAMBAHKAN!\n\n` +
+                   `📦 Stok Awal: ${stok} ${satuan}\n` +
+                   `💰 Harga Jual: Rp ${hargaJual.toLocaleString('id-ID')}\n` +
+                   `🏷️ Kategori: ${kategori}`;
+      }
     }
     // 7. Command !stok or !cekstok
     else if (messageText.toLowerCase().startsWith('!stok') || messageText.toLowerCase().startsWith('!cekstok')) {
@@ -168,83 +245,85 @@ export default async function handler(req: any, res: any) {
   }
 }
 
-// Optional Firestore REST helper for STOK update
-async function updateFirestoreProductStock(nama: string, addedStock: number, sender: string) {
+const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
+
+const INITIAL_FALLBACK_PRODUCTS = [
+  { id: 'prod-1', kode: 'BRS-001', barcode: '8991001100012', nama: 'Beras Setra Ramos Super 5kg', kategori: 'Sembako Utama', hargaBeli: 65000, hargaJual: 72000, stok: 35, minStok: 10, satuan: 'Sak', terjual: 142, gambarUrl: '', deskripsi: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+  { id: 'prod-2', kode: 'MNY-002', barcode: '8992002200029', nama: 'Minyak Goreng Tropical Refill 2L', kategori: 'Minyak & Lemak', hargaBeli: 33000, hargaJual: 38000, stok: 24, minStok: 10, satuan: 'Pouch', terjual: 98, gambarUrl: '', deskripsi: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+  { id: 'prod-3', kode: 'GLA-003', barcode: '8993003300036', nama: 'Gula Pasir Premium Gulaku 1kg', kategori: 'Sembako Utama', hargaBeli: 14500, hargaJual: 17000, stok: 40, minStok: 15, satuan: 'Kg', terjual: 85, gambarUrl: '', deskripsi: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+];
+
+async function fetchCloudProducts(): Promise<any[]> {
   try {
-    const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
-    const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?key=${FIREBASE_API_KEY}`;
-
-    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return;
-
-    const data = await res.json();
-    const docs = data.documents || [];
-
-    const searchStr = nama.toLowerCase().trim();
-
-    for (const doc of docs) {
-      const docPath = doc.name || '';
-      const fields = doc.fields || {};
-      const docNama = (fields.nama?.stringValue || '').toLowerCase().trim();
-
-      if (docNama && (docNama.includes(searchStr) || searchStr.includes(docNama))) {
-        const docId = docPath.split('/').pop();
-        const currentStock = parseInt(fields.stok?.integerValue || fields.stok?.doubleValue || '0', 10);
-        const newStock = currentStock + addedStock;
-
-        const patchUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products/${docId}?updateMask.fieldPaths=stok&updateMask.fieldPaths=updatedAt&key=${FIREBASE_API_KEY}`;
-        await fetch(patchUrl, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: {
-              stok: { integerValue: String(newStock) },
-              updatedAt: { stringValue: new Date().toISOString() }
-            }
-          }),
-          signal: AbortSignal.timeout(3000)
-        });
-        break;
+    const res = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const json = await res.json();
+      const prods = json?.data?.products;
+      if (Array.isArray(prods) && prods.length > 0) {
+        return prods;
       }
     }
   } catch (e) {
-    // Ignore optional background firestore network failures
+    console.warn('[Webhook Vercel] Could not fetch cloud products:', e);
   }
+  return [...INITIAL_FALLBACK_PRODUCTS];
 }
 
-// Optional Firestore REST helper for PRODUK creation
-async function createFirestoreProduct(nama: string, kategori: string, hargaBeli: number, hargaJual: number, stok: number, satuan: string, sender: string) {
+async function saveCloudProducts(products: any[]): Promise<void> {
   try {
-    const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
-    const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
-    const postUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?key=${FIREBASE_API_KEY}`;
-
-    const now = new Date().toISOString();
-    await fetch(postUrl, {
-      method: 'POST',
+    await fetch(CLOUD_STORE_URL, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        fields: {
-          kode: { stringValue: `SKU-${Math.floor(1000 + Math.random() * 9000)}` },
-          barcode: { stringValue: `${Math.floor(8990000000000 + Math.random() * 9999999)}` },
-          nama: { stringValue: nama },
-          kategori: { stringValue: kategori },
-          hargaBeli: { integerValue: String(hargaBeli) },
-          hargaJual: { integerValue: String(hargaJual) },
-          stok: { integerValue: String(stok) },
-          minStok: { integerValue: '5' },
-          satuan: { stringValue: satuan },
-          gambarUrl: { stringValue: '' },
-          deskripsi: { stringValue: `Diimpor via WhatsApp Bot (${sender})` },
-          terjual: { integerValue: '0' },
-          createdAt: { stringValue: now },
-          updatedAt: { stringValue: now }
-        }
+        name: 'Sembako Store Products V1',
+        data: { products }
       }),
       signal: AbortSignal.timeout(3000)
     });
   } catch (e) {
-    // Ignore optional background firestore network failures
+    console.warn('[Webhook Vercel] Could not save cloud products:', e);
   }
+}
+
+function findMatchingProductInList(targetName: string, productsList: any[]): { product: any | null; index: number } {
+  if (!targetName) return { product: null, index: -1 };
+
+  const s = targetName.trim().toLowerCase();
+  const cleanS = s.replace(/[^a-z0-9]/g, '');
+
+  if (!cleanS) return { product: null, index: -1 };
+
+  let bestIndex = -1;
+  let highestScore = 0;
+
+  productsList.forEach((p, idx) => {
+    const d = (p.nama || '').trim().toLowerCase();
+    const cleanD = d.replace(/[^a-z0-9]/g, '');
+
+    let score = 0;
+
+    if (d === s) score = 100;
+    else if (cleanD === cleanS) score = 90;
+    else if (cleanD.length >= 3 && cleanS.length >= 3 && (cleanD.includes(cleanS) || cleanS.includes(cleanD))) {
+      score = 70;
+    } else {
+      const tokensS = s.split(/\s+/).filter(t => t.length > 1);
+      const tokensD = d.split(/\s+/).filter(t => t.length > 1);
+      const matched = tokensS.filter(ts => tokensD.some(td => td.includes(ts) || ts.includes(td)));
+      if (matched.length > 0) {
+        score = Math.round((matched.length / tokensS.length) * 60);
+      }
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestIndex = idx;
+    }
+  });
+
+  if (highestScore >= 30 && bestIndex >= 0) {
+    return { product: productsList[bestIndex], index: bestIndex };
+  }
+
+  return { product: null, index: -1 };
 }

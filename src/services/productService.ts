@@ -49,7 +49,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Fast direct REST API fetch for instant (<100ms) product loading from Server + Firestore
+// Fast direct REST API fetch for instant (<100ms) product loading from Express Server + Cloud Store
+const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
+
 async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
   try {
     // 1. Try local Express API endpoint first
@@ -58,6 +60,9 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       if (serverRes.ok) {
         const data = await serverRes.json();
         if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+          try {
+            localStorage.setItem('sembako_cached_products', JSON.stringify(data.products));
+          } catch (e) {}
           return data.products;
         }
       }
@@ -65,12 +70,40 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       // ignore if local API unavailable
     }
 
-    // 2. Fallback to Firestore REST API
+    // 2. Try Cloud Store Sync Object
+    try {
+      const cloudRes = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
+      if (cloudRes.ok) {
+        const cloudJson = await cloudRes.json();
+        const prods = cloudJson?.data?.products;
+        if (Array.isArray(prods) && prods.length > 0) {
+          try {
+            localStorage.setItem('sembako_cached_products', JSON.stringify(prods));
+          } catch (e) {}
+          return prods;
+        }
+      }
+    } catch (e) {
+      // ignore cloud store fetch error
+    }
+
+    // 3. Fallback to localStorage cache
+    try {
+      const cached = localStorage.getItem('sembako_cached_products');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+
+    // 4. Fallback to Firestore REST API
     const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
     const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
     const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?pageSize=300&key=${FIREBASE_API_KEY}`;
     
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) return [];
     
     const data = await res.json();
@@ -123,22 +156,25 @@ export function subscribeProducts(
   onError?: (error: Error) => void
 ) {
   let isUnsubscribed = false;
+  let hasRestData = false;
 
   // 1. Instant Direct Fetch (<200ms)
   fetchProductsDirectRest().then((restProducts) => {
     if (!isUnsubscribed && restProducts.length > 0) {
+      hasRestData = true;
       onData(restProducts);
     }
   });
 
-  // 2. High-speed 3s Polling (Ensures stock changes via WhatsApp Webhook show immediately)
+  // 2. High-speed 2.5s Polling (Ensures stock changes via WhatsApp Webhook show immediately)
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     const items = await fetchProductsDirectRest();
     if (!isUnsubscribed && items.length > 0) {
+      hasRestData = true;
       onData(items);
     }
-  }, 3000);
+  }, 2500);
 
   // 3. Firestore JS SDK Realtime Listener
   const productsRef = collection(db, COLLECTIONS.PRODUCTS);
@@ -148,17 +184,18 @@ export function subscribeProducts(
     q,
     async (snapshot) => {
       if (isUnsubscribed) return;
-      const isDemo = Boolean(localStorage.getItem('sembako_demo_session'));
       if (snapshot.empty) {
+        // If snapshot is empty but REST had items, keep REST items! Do NOT overwrite with static demo products
+        if (hasRestData) return;
+
+        const isDemo = Boolean(localStorage.getItem('sembako_demo_session'));
         if (isDemo) {
           const demoProducts: ProdukItem[] = INITIAL_PRODUCTS.map((item, idx) => ({
             ...item,
             id: `demo-prod-${idx + 1}`,
           }));
           onData(demoProducts);
-          return;
         }
-        // If snapshot is empty but REST had items, keep REST items
         return;
       }
 
@@ -185,6 +222,7 @@ export function subscribeProducts(
         };
       });
 
+      hasRestData = true;
       onData(products);
     },
     (err) => {
@@ -213,54 +251,91 @@ export async function seedSampleProducts(): Promise<void> {
   }
 }
 
-// Add new product to Firestore
+// Add new product to Firestore + Express + Cloud Store
 export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<string> {
   const path = COLLECTIONS.PRODUCTS;
+  const now = new Date().toISOString();
+  const id = `prod-${Date.now()}`;
+  const cleanProduct: ProdukItem = {
+    id,
+    kode: product.kode || `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
+    barcode: product.barcode || '',
+    nama: product.nama || 'Produk Sembako',
+    kategori: product.kategori || 'Lainnya',
+    hargaBeli: Number(product.hargaBeli) || 0,
+    hargaJual: Number(product.hargaJual) || 0,
+    stok: Number(product.stok) || 0,
+    minStok: Number(product.minStok) || 5,
+    satuan: product.satuan || 'Pcs',
+    gambarUrl: product.gambarUrl || '',
+    deskripsi: product.deskripsi || '',
+    expiredDate: product.expiredDate || '',
+    batchNo: product.batchNo || '',
+    terjual: Number(product.terjual) || 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // 1. Send POST to Express server & Cloud Store
+  try {
+    await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleanProduct)
+    });
+  } catch (e) {
+    // ignore
+  }
+
+  // 2. Add to Firestore if available
   try {
     const productsRef = collection(db, path);
-    const now = new Date().toISOString();
-    const cleanProduct = {
-      kode: product.kode || '',
-      barcode: product.barcode || '',
-      nama: product.nama || 'Produk Sembako',
-      kategori: product.kategori || 'Lainnya',
-      hargaBeli: Number(product.hargaBeli) || 0,
-      hargaJual: Number(product.hargaJual) || 0,
-      stok: Number(product.stok) || 0,
-      minStok: Number(product.minStok) || 5,
-      satuan: product.satuan || 'Pcs',
-      gambarUrl: product.gambarUrl || '',
-      deskripsi: product.deskripsi || '',
-      expiredDate: product.expiredDate || '',
-      batchNo: product.batchNo || '',
-      terjual: Number(product.terjual) || 0,
-      createdAt: now,
-      updatedAt: now,
-    };
     const docRef = await addDoc(productsRef, cleanProduct);
     return docRef.id;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-    throw error;
+    console.warn('Firestore optional addProduct skipped:', error);
+    return id;
   }
 }
 
-// Update existing product in Firestore
+// Update existing product in Firestore + Express + Cloud Store
 export async function updateProduct(id: string, product: Partial<ProdukItem>): Promise<void> {
   const path = `${COLLECTIONS.PRODUCTS}/${id}`;
+  const now = new Date().toISOString();
+
+  // 1. Fetch current items and update via Express / Cloud Store
+  try {
+    const currentList = await fetchProductsDirectRest();
+    const existing = currentList.find(p => p.id === id);
+    if (existing) {
+      const updated: ProdukItem = {
+        ...existing,
+        ...product,
+        updatedAt: now,
+      };
+      await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // 2. Update Firestore if available
   try {
     const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
     const updateData = {
       ...product,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     };
-    // Clean undefined fields
     Object.keys(updateData).forEach(
       (key) => (updateData as any)[key] === undefined && delete (updateData as any)[key]
     );
     await setDoc(productRef, updateData, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('Firestore optional updateProduct skipped:', error);
   }
 }
 

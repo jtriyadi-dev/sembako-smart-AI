@@ -10,6 +10,23 @@ const BASE_FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIREB
 // Local file path for persistent server storage (/tmp for Vercel Serverless, local directory for local dev)
 const LOCAL_PRODUCTS_FILE = path.join('/tmp', 'localProducts.json');
 const SEED_PRODUCTS_FILE = path.join(process.cwd(), 'src', 'data', 'localProducts.json');
+const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
+
+async function syncToCloudStore(products: ProdukItem[]): Promise<void> {
+  try {
+    await fetch(CLOUD_STORE_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Sembako Store Products V1',
+        data: { products }
+      }),
+      signal: AbortSignal.timeout(3000)
+    });
+  } catch (err) {
+    // ignore background cloud sync errors
+  }
+}
 
 export interface ProductInput {
   nama: string;
@@ -60,6 +77,7 @@ function saveLocalProductsToFile(): void {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(LOCAL_PRODUCTS_FILE, JSON.stringify(inMemoryProducts, null, 2), 'utf-8');
+    syncToCloudStore(inMemoryProducts).catch(() => {});
   } catch (err) {
     console.warn('[BackendStore] Could not save localProducts.json:', err);
   }
