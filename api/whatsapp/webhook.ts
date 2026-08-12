@@ -55,14 +55,19 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    if (!body || typeof body !== 'object') {
+      body = {};
+    }
+
     if (Array.isArray(body) && body.length > 0) {
       body = body[0];
     } else if (body && Array.isArray(body.data) && body.data.length > 0) {
       body = body.data[0];
     }
 
-    const sender = body.sender || body.from || body.phone || body.wa_number || body.number || body.pushName || 'WhatsApp User';
-    const messageText = (body.message || body.text || body.body || body.caption || body.payload || body.pesan || '').toString().trim();
+    const sender = String(body.sender || body.from || body.phone || body.wa_number || body.number || body.pushName || 'WhatsApp User');
+    const rawMsg = body.message || body.text || body.body || body.caption || body.payload || body.pesan || '';
+    const messageText = typeof rawMsg === 'string' ? rawMsg.trim() : typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg).trim();
 
     if (!messageText) {
       return res.status(200).json({

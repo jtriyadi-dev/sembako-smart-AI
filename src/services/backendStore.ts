@@ -7,8 +7,9 @@ const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || process.env.
 const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
 const BASE_FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 
-// Local file path for persistent server storage
-const LOCAL_PRODUCTS_FILE = path.join(process.cwd(), 'src', 'data', 'localProducts.json');
+// Local file path for persistent server storage (/tmp for Vercel Serverless, local directory for local dev)
+const LOCAL_PRODUCTS_FILE = path.join('/tmp', 'localProducts.json');
+const SEED_PRODUCTS_FILE = path.join(process.cwd(), 'src', 'data', 'localProducts.json');
 
 export interface ProductInput {
   nama: string;
@@ -35,16 +36,23 @@ function loadLocalProductsFromFile(): void {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
         inMemoryProducts = parsed;
+        return;
       }
-    } else {
-      saveLocalProductsToFile();
+    }
+    if (fs.existsSync(SEED_PRODUCTS_FILE)) {
+      const data = fs.readFileSync(SEED_PRODUCTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        inMemoryProducts = parsed;
+        return;
+      }
     }
   } catch (err) {
     console.warn('[BackendStore] Could not load localProducts.json:', err);
   }
 }
 
-// Save local JSON file
+// Save local JSON file safely
 function saveLocalProductsToFile(): void {
   try {
     const dir = path.dirname(LOCAL_PRODUCTS_FILE);
@@ -149,7 +157,7 @@ export function findMatchingProduct(targetName: string): { product: ProdukItem |
 
 export async function processProductWebhook(input: ProductInput): Promise<{ message: string; updatedStock: number; isNew: boolean }> {
   try {
-    const targetName = input.nama.trim();
+    const targetName = (input?.nama || 'Produk').toString().trim();
     const now = new Date().toISOString();
 
     const { product: matchedProduct, index: matchedIndex } = findMatchingProduct(targetName);
