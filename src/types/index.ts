@@ -202,7 +202,7 @@ export interface CrmUser {
   licenseKey: string;
   deviceLimit: number;
   activeDevicesCount: number;
-  role: 'owner' | 'admin' | 'kasir';
+  role: 'developer' | 'owner' | 'admin' | 'kasir';
   notes?: string;
   createdAt: string;
   updatedAt: string;

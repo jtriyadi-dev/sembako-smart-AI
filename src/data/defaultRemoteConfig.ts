@@ -138,6 +138,27 @@ export const DEFAULT_REMOTE_CONFIG: RemoteAppConfig = {
 
 export const INITIAL_CRM_USERS: CrmUser[] = [
   {
+    id: 'user-crm-dev',
+    namaPemilik: 'Master Developer (Super Admin)',
+    namaToko: 'Pusat Developer Sembako Smart AI',
+    email: 'developer@sembakosmart.id',
+    password: 'password123',
+    noHp: '081234567899',
+    alamatToko: 'Headquarters Sembako Smart POS, Jakarta',
+    plan: 'enterprise',
+    status: 'aktif',
+    licenseKey: 'SBK-DEV-MASTER-9988',
+    deviceLimit: 99,
+    activeDevicesCount: 1,
+    role: 'developer',
+    notes: 'Akun Super Admin Developer dengan akses penuh ke CRM & POS',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+    expiresAt: null,
+    lastLoginAt: '2026-08-18T08:00:00.000Z',
+    totalTransactions: 999
+  },
+  {
     id: 'user-crm-001',
     namaPemilik: 'Haji Budi Santoso',
     namaToko: 'Toko Berkah Sembako Utama',

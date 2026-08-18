@@ -90,6 +90,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const [searchUser, setSearchUser] = useState('');
   const [filterPlan, setFilterPlan] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterRole, setFilterRole] = useState<string>('all');
 
   // User Modal State (Add/Edit)
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -299,12 +300,14 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
 
     const matchPlan = filterPlan === 'all' || u.plan === filterPlan;
     const matchStatus = filterStatus === 'all' || u.status === filterStatus;
+    const matchRole = filterRole === 'all' || (u.role || 'owner') === filterRole;
 
-    return matchSearch && matchPlan && matchStatus;
+    return matchSearch && matchPlan && matchStatus && matchRole;
   });
 
   // Calculate telemetry stats
   const totalUsers = crmUsers.length;
+  const devUsersCount = crmUsers.filter(u => u.role === 'developer').length;
   const activeProUsers = crmUsers.filter(u => u.plan === 'pro_lifetime' && u.status === 'aktif').length;
   const trialUsers = crmUsers.filter(u => u.plan === 'trial_6h').length;
   const enterpriseUsers = crmUsers.filter(u => u.plan === 'enterprise').length;
@@ -606,12 +609,14 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                 <button
                   onClick={() => {
                     const defaultPassword = 'sembako' + Math.floor(1000 + Math.random() * 9000);
+                    const defaultLicense = `SBK-PRO-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
                     setEditingUser({
                       plan: 'pro_lifetime',
                       status: 'aktif',
                       deviceLimit: 3,
                       role: 'owner',
                       password: defaultPassword,
+                      licenseKey: defaultLicense,
                     });
                     setIsUserModalOpen(true);
                   }}
@@ -705,6 +710,18 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
 
             <div className="flex items-center gap-2 flex-wrap">
               <select
+                value={filterRole}
+                onChange={(e) => setFilterRole(e.target.value)}
+                className="px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 outline-none font-medium"
+              >
+                <option value="all">Semua Role</option>
+                <option value="developer">🛡️ Developer / Super Admin</option>
+                <option value="owner">👑 Owner Toko</option>
+                <option value="admin">💼 Admin Toko</option>
+                <option value="kasir">💻 Kasir POS</option>
+              </select>
+
+              <select
                 value={filterPlan}
                 onChange={(e) => setFilterPlan(e.target.value)}
                 className="px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 outline-none"
@@ -729,12 +746,14 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
               <button
                 onClick={() => {
                   const defaultPassword = 'sembako' + Math.floor(1000 + Math.random() * 9000);
+                  const defaultLicense = `SBK-PRO-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
                   setEditingUser({
                     plan: 'pro_lifetime',
                     status: 'aktif',
                     deviceLimit: 3,
                     role: 'owner',
                     password: defaultPassword,
+                    licenseKey: defaultLicense,
                   });
                   setIsUserModalOpen(true);
                 }}
@@ -753,7 +772,8 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                 <thead className="bg-slate-50 dark:bg-slate-800/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
                   <tr>
                     <th className="px-4 py-3.5">Pelanggan & Toko</th>
-                    <th className="px-4 py-3.5">Kontak & Alamat</th>
+                    <th className="px-4 py-3.5">Role & Hak Akses</th>
+                    <th className="px-4 py-3.5">Kontak & Password</th>
                     <th className="px-4 py-3.5">Paket & Lisensi</th>
                     <th className="px-4 py-3.5">Status Akun</th>
                     <th className="px-4 py-3.5">Masa Aktif</th>
@@ -763,14 +783,14 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {loadingUsers ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400">
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
                         <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-emerald-500" />
                         Memuat data pelanggan CRM...
                       </td>
                     </tr>
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400">
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
                         Tidak ada akun pelanggan yang cocok dengan pencarian.
                       </td>
                     </tr>
@@ -779,16 +799,38 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                       const isPro = user.plan === 'pro_lifetime';
                       const isTrial = user.plan === 'trial_6h';
                       const isEnterprise = user.plan === 'enterprise';
+                      const role = user.role || 'owner';
 
                       return (
                         <tr key={user.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                           <td className="px-4 py-3.5">
-                            <div className="font-bold text-slate-900 dark:text-white">
-                              {user.namaPemilik}
+                            <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <span>{user.namaPemilik}</span>
                             </div>
                             <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
                               <span>🏪 {user.namaToko}</span>
                             </div>
+                          </td>
+
+                          <td className="px-4 py-3.5">
+                            {role === 'developer' ? (
+                              <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center gap-1 w-fit shadow-xs">
+                                <ShieldCheck className="w-3 h-3 text-purple-500" />
+                                Developer / Super Admin
+                              </span>
+                            ) : role === 'owner' ? (
+                              <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1 w-fit">
+                                👑 Owner Toko
+                              </span>
+                            ) : role === 'admin' ? (
+                              <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/30 flex items-center gap-1 w-fit">
+                                💼 Admin Toko
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1 w-fit">
+                                💻 Kasir POS
+                              </span>
+                            )}
                           </td>
 
                           <td className="px-4 py-3.5">
@@ -1981,6 +2023,75 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                 </p>
               </div>
 
+              {/* Role & Hak Akses Akun */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-purple-500" />
+                    Role & Hak Akses Akun
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    Pilih wewenang akses akun
+                  </span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    {
+                      id: 'developer',
+                      label: 'Developer',
+                      sub: 'Super Admin CRM',
+                      badge: 'Full Dev',
+                      color: 'border-purple-500/40 text-purple-600 dark:text-purple-300 bg-purple-500/10',
+                      activeColor: 'ring-2 ring-purple-500 bg-purple-500/20 font-bold',
+                    },
+                    {
+                      id: 'owner',
+                      label: 'Owner Toko',
+                      sub: 'Akses Penuh POS',
+                      badge: 'Owner',
+                      color: 'border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10',
+                      activeColor: 'ring-2 ring-amber-500 bg-amber-500/20 font-bold',
+                    },
+                    {
+                      id: 'admin',
+                      label: 'Admin Toko',
+                      sub: 'Kelola Stok/Barang',
+                      badge: 'Admin',
+                      color: 'border-blue-500/40 text-blue-600 dark:text-blue-300 bg-blue-500/10',
+                      activeColor: 'ring-2 ring-blue-500 bg-blue-500/20 font-bold',
+                    },
+                    {
+                      id: 'kasir',
+                      label: 'Kasir POS',
+                      sub: 'Kasir & Transaksi',
+                      badge: 'Kasir',
+                      color: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10',
+                      activeColor: 'ring-2 ring-emerald-500 bg-emerald-500/20 font-bold',
+                    },
+                  ].map((r) => {
+                    const isSelected = (editingUser?.role || 'owner') === r.id;
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setEditingUser({ ...editingUser, role: r.id as any })}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? `${r.activeColor} ${r.color} shadow-sm`
+                            : 'border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold">{r.label}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 shrink-0" />}
+                        </div>
+                        <span className="text-[10px] opacity-80 leading-tight">{r.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -2028,16 +2139,45 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Kode Lisensi Resmi
-                  </label>
-                  <input
-                    type="text"
-                    value={editingUser?.licenseKey || ''}
-                    onChange={(e) => setEditingUser({ ...editingUser, licenseKey: e.target.value })}
-                    placeholder="Auto-generated jika kosong"
-                    className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Kode Lisensi Resmi
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const prefix = editingUser?.plan === 'trial_6h' ? 'TRL' : editingUser?.plan === 'enterprise' ? 'ENT' : 'PRO';
+                        const newLicense = `SBK-${prefix}-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+                        setEditingUser({ ...editingUser, licenseKey: newLicense });
+                      }}
+                      className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                      Generate Acak
+                    </button>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={editingUser?.licenseKey || ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, licenseKey: e.target.value })}
+                      placeholder="Auto-generated jika kosong"
+                      className="w-full p-2.5 pr-24 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono tracking-wider"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const prefix = editingUser?.plan === 'trial_6h' ? 'TRL' : editingUser?.plan === 'enterprise' ? 'ENT' : 'PRO';
+                        const newLicense = `SBK-${prefix}-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+                        setEditingUser({ ...editingUser, licenseKey: newLicense });
+                      }}
+                      className="absolute right-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-[10px] font-bold flex items-center gap-1 transition-all shadow-sm cursor-pointer"
+                      title="Klik untuk generate kode lisensi resmi instan"
+                    >
+                      <Key className="w-3 h-3" />
+                      <span>Generate</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
