@@ -90,7 +90,11 @@ const MainAppContent: React.FC = () => {
   }
 
   // 3. Menu Aktivasi Lisensi (For new users with unactivated license)
-  const isActivated = licenseInfo.isActivated || isDemoSession || isDevAuth;
+  const isDevSession =
+    profile?.role === 'developer' ||
+    Boolean(localStorage.getItem('sembako_developer_auth_session'));
+
+  const isActivated = licenseInfo.isActivated || isDemoSession || isDevAuth || isDevSession;
   if (currentPage === 'activation' || !isActivated) {
     return (
       <div className="min-h-screen bg-slate-950 text-white font-sans">

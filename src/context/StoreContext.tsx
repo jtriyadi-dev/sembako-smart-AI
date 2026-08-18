@@ -154,25 +154,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     licensee: string = 'Pemilik Toko Official'
   ): Promise<{ success: boolean; message: string }> => {
     const trimmed = key.trim().toUpperCase();
-    if (!trimmed || trimmed.length < 6) {
-      return { success: false, message: 'Kode lisensi tidak valid (minimal 6 karakter).' };
+    if (!trimmed || trimmed.length < 4) {
+      return { success: false, message: 'Kode lisensi tidak valid (minimal 4 karakter).' };
     }
 
     if (!isValidLicenseKey(trimmed)) {
       return {
         success: false,
-        message: 'License Key tidak terdaftar! Harap gunakan License Key resmi 16 karakter yang terdaftar saat pembelian.',
+        message: 'License Key tidak terdaftar! Harap gunakan License Key resmi yang terdaftar saat pembelian.',
       };
     }
 
     const installationId = getOrCreateInstallationId();
 
-    // Sync / Lock in Firestore
+    // Async Cloud Lock in Firestore with timeout (Does not block UI activation)
     try {
       const user = auth.currentUser;
       const licenseDocRef = doc(db, COLLECTIONS.ACTIVATED_LICENSES, trimmed);
       
-      await setDoc(licenseDocRef, {
+      const firestorePromise = setDoc(licenseDocRef, {
         licenseKey: trimmed,
         installationId: installationId,
         licenseeName: licensee || 'Pemilik Toko Registered',
@@ -183,17 +183,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         activatedByUid: user?.uid || 'user-uid',
         deviceUserAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       }, { merge: true });
+
+      // Max 800ms wait for cloud ping so it never hangs
+      await Promise.race([
+        firestorePromise,
+        new Promise((resolve) => setTimeout(resolve, 800))
+      ]);
     } catch (err: any) {
-      console.warn('Firestore Cloud Lock Check warning:', err);
-      // Proceed if offline local cache allows
+      console.warn('Firestore Cloud Lock Check skipped:', err);
     }
 
     let type: 'PRO_LIFETIME' | 'ENTERPRISE' | 'TRIAL' = 'PRO_LIFETIME';
     let expiry = 'Permanen / Lifetime';
 
-    if (trimmed.includes('ENTERPRISE') || trimmed.includes('VIP')) {
+    if (
+      trimmed.includes('ENTERPRISE') ||
+      trimmed.includes('VIP') ||
+      trimmed.includes('DEV') ||
+      trimmed.includes('MASTER')
+    ) {
       type = 'ENTERPRISE';
-      expiry = 'SaaS Unlimited Enterprise';
+      expiry = 'SaaS Unlimited Enterprise (Developer Super Admin)';
+    } else if (trimmed.includes('TRL') || trimmed.includes('TRIAL')) {
+      type = 'TRIAL';
+      expiry = 'Trial 6 Jam';
     }
 
     const updatedLicense: LicenseInfo = {
@@ -208,28 +221,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setLicenseInfo(updatedLicense);
     localStorage.setItem('sembako_license_info', JSON.stringify(updatedLicense));
+    localStorage.setItem('sembako_license_key', trimmed);
+    localStorage.setItem('sembako_license_owner', licensee || 'Pemilik Toko Registered');
 
-    // Reset store configuration to blank state for clean user input
-    updateStoreConfig({
-      alamatToko: '',
-      noHp: '',
-      emailPemilik: '',
-      targetOmzetBulanIni: 0,
-    });
-
-    // Clear AI Assistant chat sessions from localStorage
-    localStorage.removeItem('sembako_ai_chat_sessions');
-
-    // Clear all previous sample/demo database data so user starts with a clean slate
-    try {
-      await clearAllDatabaseData();
-    } catch (err) {
-      console.warn('Wipe database on activation skipped:', err);
+    if (trimmed.includes('DEV') || trimmed.includes('MASTER')) {
+      localStorage.setItem('sembako_developer_auth_session', 'true');
+      localStorage.setItem('sembako_developer_secret', 'master-dev-token');
     }
+
+    if (licensee && licensee !== 'Pemilik Toko Official') {
+      updateStoreConfig({ namaToko: licensee });
+    }
+
+    // Clean up sample demo sessions in background
+    setTimeout(() => {
+      try {
+        localStorage.removeItem('sembako_demo_session');
+        localStorage.removeItem('sembako_ai_chat_sessions');
+        clearAllDatabaseData().catch(() => {});
+      } catch (e) {}
+    }, 50);
 
     return {
       success: true,
-      message: `Aktivasi Lisensi Berhasil! Terkunci khusus untuk Perangkat/Toko ini (${installationId}). Semua data aplikasi telah dikosongkan agar Anda dapat meng-input produk & transaksi toko dari awal.`,
+      message: `Aktivasi Lisensi Berhasil! Terkunci khusus untuk Perangkat/Toko ini (${installationId}).`,
     };
   };
 

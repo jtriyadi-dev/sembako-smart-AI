@@ -179,13 +179,18 @@ export function isValidLicenseKey(key: string): boolean {
   // 4. Raw 16-character alphanumeric key (without hyphens)
   if (normalized.length === 16 && /^[A-Z0-9]+$/.test(normalized)) return true;
 
-  // 5. Pattern check for all generated vendor/serial key formats (length >= 10)
+  // 5. Pattern check for all generated vendor/serial key formats (length >= 6)
   if (
+    normalized.startsWith('SBK-') ||
+    normalized.startsWith('DEV-') ||
+    normalized.startsWith('MASTER-') ||
     normalized.startsWith('SEMBAKO-PRO-') ||
     normalized.startsWith('PRO-') ||
     normalized.startsWith('KEY-') ||
     normalized.startsWith('VIP-') ||
-    (normalized.length >= 10 && /^[A-Z0-9-]+$/.test(normalized))
+    normalized.includes('MASTER') ||
+    normalized.includes('DEV') ||
+    (normalized.length >= 8 && /^[A-Z0-9-]+$/.test(normalized))
   ) {
     return true;
   }

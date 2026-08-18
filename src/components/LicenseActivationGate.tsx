@@ -40,25 +40,28 @@ export const LicenseActivationGate: React.FC<LicenseActivationGateProps> = ({
     e.preventDefault();
     setErrorMessage('');
 
-    if (!inputKey.trim()) {
-      setErrorMessage('Harap masukkan License Key 16-karakter Anda.');
+    const cleanKey = inputKey.trim().toUpperCase();
+    if (!cleanKey) {
+      setErrorMessage('Harap masukkan License Key resmi Anda.');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const result = await activateLicenseKey(inputKey.trim(), storeName.trim() || 'Pemilik Toko Official');
-      setIsLoading(false);
+      const result = await activateLicenseKey(cleanKey, storeName.trim() || 'Pemilik Toko Official');
 
       if (result.success) {
         if (storeName.trim()) {
           updateStoreConfig({ namaToko: storeName.trim() });
         }
         success('Aktivasi Berhasil!', result.message);
+        
+        // Immediate navigation to dashboard
         if (onActivateSuccess) {
           onActivateSuccess();
-        } else if (onNavigate) {
+        }
+        if (onNavigate) {
           onNavigate('dashboard');
         }
       } else {
@@ -66,8 +69,9 @@ export const LicenseActivationGate: React.FC<LicenseActivationGateProps> = ({
         toastError('Aktivasi Gagal', result.message);
       }
     } catch (err: any) {
-      setIsLoading(false);
       setErrorMessage(err?.message || 'Terjadi kesalahan sistem saat mendeteksi lisensi.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
