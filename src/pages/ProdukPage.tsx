@@ -504,7 +504,7 @@ export const ProdukPage: React.FC = () => {
                               <img src={p.gambarUrl} alt={p.nama} className="w-full h-full object-cover" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center font-bold text-[10px] text-slate-400">
-                                {p.kode.substring(0, 3)}
+                                {(p.kode || p.nama || 'SKU').substring(0, 3)}
                               </div>
                             )}
                           </div>
@@ -513,7 +513,7 @@ export const ProdukPage: React.FC = () => {
                               {p.nama}
                             </h4>
                             <span className="font-mono text-[11px] text-slate-400 block mt-0.5">
-                              SKU: {p.kode}
+                              SKU: {p.kode || '-'}
                             </span>
                           </div>
                         </div>

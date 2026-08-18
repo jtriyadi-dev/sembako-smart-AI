@@ -51,13 +51,13 @@ export const ProductDeleteModal: React.FC<ProductDeleteModalProps> = ({
             {product.gambarUrl ? (
               <img src={product.gambarUrl} alt={product.nama} className="w-full h-full object-cover" />
             ) : (
-              <span className="text-xs font-bold text-slate-400">{product.kode.substring(0, 3)}</span>
+              <span className="text-xs font-bold text-slate-400">{(product.kode || product.nama || 'SKU').substring(0, 3)}</span>
             )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{product.nama}</p>
             <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-              <span className="font-mono">{product.kode}</span>
+              <span className="font-mono">{product.kode || '-'}</span>
               <span>•</span>
               <span>{product.kategori}</span>
               <span>•</span>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PageId } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useRemoteConfig } from '../context/RemoteConfigContext';
 import {
   Store,
   Sparkles,
@@ -45,7 +46,11 @@ import {
   Save,
   RotateCcw,
   ImagePlus,
-  UploadCloud
+  UploadCloud,
+  Play,
+  Video,
+  Sliders,
+  ShieldAlert
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -55,9 +60,10 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
   const { demoLogin } = useAuth();
   const { success } = useToast();
+  const { config, isDevAuth } = useRemoteConfig();
 
-  // Custom Banner Image State
-  const DEFAULT_BANNER = 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?q=80&w=1600&auto=format&fit=crop';
+  // Custom Banner Image State (syncs with live config by default)
+  const DEFAULT_BANNER = config?.media?.heroBannerImage || 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?q=80&w=1600&auto=format&fit=crop';
   const [savedBannerImage, setSavedBannerImage] = useState<string>(() => {
     return localStorage.getItem('custom_landing_banner') || DEFAULT_BANNER;
   });
@@ -132,7 +138,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
     setOpenFaqIndex(openFaqIndex === index ? null : index);
   };
 
-  const faqs = [
+  const faqs = config?.faqs && config.faqs.length > 0 ? config.faqs : [
     {
       q: 'Apakah aplikasi ini memerlukan biaya langganan bulanan?',
       a: 'TIDAK! Sembako Smart POS AI harganya CUMA Rp 99.000 (99rb) Sekali Bayar (Lifetime License). Setelah membeli lisensi resmi, Anda mendapatkan akses seumur hidup tanpa biaya bulanan atau tahunan tersembunyi.'
@@ -162,10 +168,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-hidden relative">
       
-      {/* TOP PROMO ANNOUNCEMENT BAR */}
-      <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-amber-500 text-slate-950 font-black text-xs py-2 px-4 text-center flex flex-wrap items-center justify-center gap-2 shadow-md">
-        <span>🔥 PROMO KHUSUS HARI INI: HARGA APLIKASI CUMA 99RB (RP 99.000) SEKALI BAYAR SELAMANYA!</span>
-      </div>
+      {/* MAINTENANCE MODE NOTICE IF ACTIVE */}
+      {config?.maintenance?.enabled && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-2.5 text-center text-xs font-black flex items-center justify-center gap-2 border-b border-amber-600 shadow-lg">
+          <ShieldAlert className="w-4 h-4 text-slate-950 animate-bounce" />
+          <span>{config.maintenance.title || 'PEMELIHARAAN SISTEM'}: {config.maintenance.message || 'Sedang dilakukan pembaruan sistem.'}</span>
+          <button
+            onClick={() => onNavigate('control-panel')}
+            className="ml-3 px-2.5 py-0.5 rounded bg-slate-950 text-amber-300 text-[10px] font-extrabold hover:bg-slate-900 cursor-pointer"
+          >
+            Buka Control Panel
+          </button>
+        </div>
+      )}
+
+      {/* TOP PROMO ANNOUNCEMENT BAR (CMS DYNAMIC) */}
+      {config?.announcement?.enabled !== false && (
+        <div
+          className={`font-black text-xs py-2 px-4 text-center flex flex-wrap items-center justify-center gap-2 shadow-md transition-colors ${
+            config?.announcement?.theme === 'amber'
+              ? 'bg-amber-500 text-slate-950'
+              : config?.announcement?.theme === 'indigo'
+              ? 'bg-indigo-600 text-white'
+              : config?.announcement?.theme === 'rose'
+              ? 'bg-rose-600 text-white'
+              : config?.announcement?.theme === 'slate'
+              ? 'bg-slate-800 text-slate-200'
+              : 'bg-emerald-600 text-emerald-950'
+          }`}
+        >
+          {config?.announcement?.badgeText && (
+            <span className="px-1.5 py-0.5 rounded bg-slate-950/20 text-[10px] uppercase font-extrabold">
+              {config.announcement.badgeText}
+            </span>
+          )}
+          <span>{config?.announcement?.message || '🔥 PROMO KHUSUS HARI INI: HARGA APLIKASI CUMA 99RB (RP 99.000) SEKALI BAYAR SELAMANYA!'}</span>
+        </div>
+      )}
 
       {/* 1. TOP NAVIGATION BAR */}
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-slate-950/85 border-b border-emerald-500/20 shadow-xl shadow-slate-950/50">
@@ -181,7 +220,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-emerald-400 via-teal-200 to-amber-300 bg-clip-text text-transparent">
-                  SEMBAKO SMART
+                  {config?.branding?.appName || 'SEMBAKO SMART'}
                 </span>
                 <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-amber-400 text-slate-950">
                   POS AI
@@ -194,19 +233,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* Nav Links (Desktop) */}
           <nav className="hidden md:flex items-center gap-6 text-xs font-bold text-slate-300">
             <a href="#fitur" className="hover:text-amber-400 transition-colors">Fitur Utama</a>
+            <a href="#video-tutorial" className="hover:text-amber-400 transition-colors flex items-center gap-1">
+              <Video className="w-3.5 h-3.5 text-amber-400" />
+              <span>Video Tutorial</span>
+            </a>
             <a href="#perangkat" className="hover:text-amber-400 transition-colors">Kompatibilitas</a>
             <a href="#kalkulator" className="hover:text-amber-400 transition-colors">Kalkulator ROI</a>
-            <a href="#harga" className="hover:text-amber-400 transition-colors">Paket Harga (99rb)</a>
+            <a href="#harga" className="hover:text-amber-400 transition-colors">Paket Harga ({config?.pricing?.promoPrice ? `Rp ${config.pricing.promoPrice.toLocaleString('id-ID')}` : '99rb'})</a>
             <a href="#testimoni" className="hover:text-amber-400 transition-colors">Testimoni</a>
             <a href="#faq" className="hover:text-amber-400 transition-colors">FAQ</a>
           </nav>
 
           {/* Header Action Buttons */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Developer Control Panel Shortcut Button */}
+            <button
+              onClick={() => onNavigate('control-panel')}
+              title="Buka Control Panel Developer & CRM"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/40 text-slate-300 hover:text-emerald-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
+            >
+              <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Control Panel</span>
+            </button>
+
             {/* Quick Demo Button */}
             <button
               onClick={handleStartDemo}
-              className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold transition-all cursor-pointer"
+              className="hidden lg:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold transition-all cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5 text-amber-400" />
               <span>Coba Demo 6 Jam</span>
@@ -247,7 +300,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               {/* Image Frame */}
               <div className="relative h-64 sm:h-80 md:h-[420px] w-full overflow-hidden">
                 <img
-                  src={previewBannerImage}
+                  src={previewBannerImage || config?.media?.heroBannerImage || DEFAULT_BANNER}
                   alt="Toko Sembako Modern Sembako Smart AI"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover object-center transform group-hover:scale-105 transition-transform duration-700 filter brightness-90"
@@ -310,20 +363,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* Top Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-extrabold tracking-wide">
             <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>🔥 PROMO LISENSI LENGKAP CUMA 99RB SEKALI BAYAR SELAMANYA</span>
+            <span>{config?.hero?.badgeText || '🔥 PROMO LISENSI LENGKAP CUMA 99RB SEKALI BAYAR SELAMANYA'}</span>
           </div>
 
           {/* Main Title */}
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight max-w-5xl mx-auto">
-            Kelola Toko Sembako & Grosir Lebih{' '}
+            {config?.hero?.headline || 'Kelola Toko Sembako & Grosir Lebih'}{' '}
             <span className="bg-gradient-to-r from-emerald-400 via-teal-200 to-amber-300 bg-clip-text text-transparent">
-              Cepat, Akurat, dan Bebas Bocor!
+              {config?.hero?.headlineHighlight || 'Cepat, Akurat, dan Bebas Bocor!'}
             </span>
           </h1>
 
           {/* Subtitle Description */}
           <p className="text-slate-300 text-base sm:text-lg max-w-3xl mx-auto leading-relaxed">
-            Tinggalkan pencatatan manual! Sembako Smart POS AI membantu Anda mengelola ribuan produk sembako, scan barcode kamera HP, cetak nota Bluetooth, serta deteksi stok kritis & barang kedaluwarsa secara otomatis. Cuma 99rb sekali bayar!
+            {config?.hero?.subheadline || 'Tinggalkan pencatatan manual! Sembako Smart POS AI membantu Anda mengelola ribuan produk sembako, scan barcode kamera HP, cetak nota Bluetooth, serta deteksi stok kritis & barang kedaluwarsa secara otomatis. Cuma 99rb sekali bayar!'}
           </p>
 
           {/* Action Buttons */}
@@ -333,7 +386,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 hover:from-emerald-400 hover:to-amber-300 text-slate-950 font-black text-sm shadow-2xl shadow-emerald-500/30 flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 cursor-pointer border-2 border-amber-300/60"
             >
               <Lock className="w-5 h-5 text-slate-950" />
-              <span>Masuk Ke Menu Login Aplikasi</span>
+              <span>{config?.hero?.ctaPrimaryText || 'Masuk Ke Menu Login Aplikasi'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
 
@@ -342,17 +395,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-extrabold text-sm shadow-xl flex items-center justify-center gap-2.5 transition-all hover:scale-105 active:scale-95 cursor-pointer"
             >
               <Zap className="w-5 h-5 text-amber-400 fill-amber-400" />
-              <span>Coba Demo Instant 6 Jam</span>
+              <span>{config?.hero?.ctaSecondaryText || 'Coba Demo Instant 6 Jam'}</span>
             </button>
 
             <a
-              href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
+              href={`https://wa.me/${config?.branding?.supportWa || '6285187869164'}?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-extrabold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-lg"
             >
               <MessageSquare className="w-5 h-5 fill-emerald-400 text-emerald-400" />
-              <span>Beli Lisensi 99rb</span>
+              <span>Beli Lisensi {config?.pricing?.promoPrice ? `Rp ${config.pricing.promoPrice.toLocaleString('id-ID')}` : '99rb'}</span>
             </a>
           </div>
 
@@ -994,6 +1047,60 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
         </div>
       </section>
 
+      {/* 5.5 DYNAMIC VIDEO TUTORIAL & MEDIA SHOWCASE SECTION */}
+      <section id="video-tutorial" className="py-20 bg-slate-900/90 border-b border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+          
+          <div className="text-center space-y-3">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold">
+              <Video className="w-3.5 h-3.5 text-amber-400" />
+              <span>Video Tutorial & Demo Pemakaian</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-black text-slate-100">
+              Lihat Betapa Mudahnya Menggunakan Sembako Smart POS AI
+            </h2>
+            <p className="text-slate-400 text-sm max-w-2xl mx-auto">
+              Simak video panduan singkat cara transaksi kasir cepat, cetak struk Bluetooth, dan scan barcode tanpa ribet.
+            </p>
+          </div>
+
+          {/* Videos Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+            {(config?.media?.videos && config.media.videos.length > 0 ? config.media.videos : [
+              {
+                id: 'v1',
+                title: 'Tutorial Kasir Cepat & Cetak Struk Bluetooth',
+                description: 'Panduan lengkap transaksi kasir POS toko sembako dalam hitungan detik.',
+                embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'
+              },
+              {
+                id: 'v2',
+                title: 'Cara Scan Barcode & Rekap Laporan Otomatis',
+                description: 'Deteksi stok kritis, scan kamera HP, dan ekspor pembukuan ke Excel.',
+                embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'
+              }
+            ]).map((v) => (
+              <div key={v.id} className="rounded-3xl bg-slate-950 border border-slate-800 overflow-hidden shadow-2xl space-y-4 p-4 hover:border-emerald-500/40 transition-colors">
+                <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800/80">
+                  <iframe
+                    src={v.embedUrl}
+                    title={v.title}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="w-full h-full border-0"
+                  />
+                </div>
+                <div className="px-2 space-y-1">
+                  <h3 className="text-base font-extrabold text-slate-100">{v.title}</h3>
+                  <p className="text-xs text-slate-400">{v.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      </section>
+
       {/* 6. INTERACTIVE ROI & PROFIT CALCULATOR */}
       <section id="kalkulator" className="py-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         
@@ -1084,7 +1191,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <span>Pilihan Paket Lisensi Aplikasi</span>
           </div>
           <h2 className="text-3xl sm:text-4xl font-black text-slate-100">
-            Lisensi Sekali Bayar Cuma Rp 99.000, Tanpa Biaya Bulanan!
+            Lisensi Sekali Bayar Cuma {config?.pricing?.promoPrice ? `Rp ${config.pricing.promoPrice.toLocaleString('id-ID')}` : 'Rp 99.000'}, Tanpa Biaya Bulanan!
           </h2>
           <p className="text-slate-400 text-sm">Promo spesial terbatas! Dapatkan akses seumur hidup untuk seluruh fitur kasir POS & AI Asisten.</p>
         </div>
@@ -1134,58 +1241,52 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* Package 2: PRO AI SMART (BEST SELLER) */}
           <div className="p-8 rounded-3xl bg-gradient-to-b from-emerald-950/60 via-slate-900 to-slate-950 border-2 border-emerald-500 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/10">
             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wider shadow-md whitespace-nowrap">
-              ★ PROMO TERBAIK - CUMA 99RB SEKALI BAYAR ★
+              {config?.pricing?.promoBadge || '★ PROMO TERBAIK - CUMA 99RB SEKALI BAYAR ★'}
             </div>
 
             <div className="space-y-4 pt-2">
               <div className="space-y-1">
                 <span className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Lifetime License</span>
-                <h3 className="text-xl font-black text-slate-100">Paket Pro Smart AI</h3>
+                <h3 className="text-xl font-black text-slate-100">{config?.pricing?.promoTitle || 'Paket Pro Smart AI'}</h3>
                 <p className="text-xs text-slate-300">Solusi paling lengkap untuk toko sembako & grosir.</p>
               </div>
 
               <div className="space-y-1">
-                <span className="text-xs text-slate-500 line-through">Rp 499.000</span>
+                <span className="text-xs text-slate-500 line-through">
+                  Rp {(config?.pricing?.normalPrice || 499000).toLocaleString('id-ID')}
+                </span>
                 <div className="text-3xl font-black text-emerald-400 font-mono">
-                  Rp 99.000 <span className="text-xs font-sans text-slate-400 font-normal">/ Sekali Bayar</span>
+                  Rp {(config?.pricing?.promoPrice || 99000).toLocaleString('id-ID')} <span className="text-xs font-sans text-slate-400 font-normal">/ Sekali Bayar</span>
                 </div>
                 <p className="text-[11px] text-amber-300 font-bold">100% Bebas Biaya Bulanan / Tahunan!</p>
               </div>
 
               <ul className="space-y-2.5 text-xs text-slate-200">
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Lisensi Aktif Permanen Selamanya
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Kasir POS & Scan Barcode Kamera HP
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Unlocked AI Asisten Sembako Smart
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Ekspor Laporan Excel (.xlsx) & PDF
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Peringatan Expired & Stok Kritis
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Cetak Struk Nota Bluetooth & PDF
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400 font-bold" /> Pendampingan WA Support Gratis
-                </li>
+                {(config?.pricing?.featuresList || [
+                  'Lisensi Aktif Permanen Selamanya',
+                  'Kasir POS & Scan Barcode Kamera HP',
+                  'Unlocked AI Asisten Sembako Smart',
+                  'Ekspor Laporan Excel (.xlsx) & PDF',
+                  'Peringatan Expired & Stok Kritis',
+                  'Cetak Struk Nota Bluetooth & PDF',
+                  'Pendampingan WA Support Gratis'
+                ]).map((feat, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-400 font-bold" /> {feat}
+                  </li>
+                ))}
               </ul>
             </div>
 
             <div className="space-y-2.5">
               <a
-                href="https://wa.me/6285187869164?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb"
+                href={`https://wa.me/${config?.branding?.supportWa || '6285187869164'}?text=Halo%20Admin%20Sembako%20Smart%20POS%20AI,%20saya%20ingin%20beli%20paket%20lisensi%2099rb`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
               >
                 <MessageSquare className="w-4 h-4 fill-slate-950" />
-                <span>Beli Lisensi 99rb via WhatsApp</span>
+                <span>Beli Lisensi {config?.pricing?.promoPrice ? `Rp ${config.pricing.promoPrice.toLocaleString('id-ID')}` : '99rb'} via WhatsApp</span>
               </a>
               <button
                 onClick={() => onNavigate('login')}
@@ -1371,9 +1472,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <span>Developed by <span className="font-bold text-slate-300">Smart AI Indonesia</span> (<a href="https://www.smart-ai.id" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">www.smart-ai.id</a>)</span>
           </div>
           <div className="flex items-center gap-6">
-            <button onClick={() => onNavigate('landing')} className="hover:text-amber-400">Beranda</button>
-            <button onClick={() => onNavigate('login')} className="hover:text-amber-400">Login Aplikasi</button>
-            <button onClick={handleStartDemo} className="hover:text-amber-400">Mode Demo 6 Jam</button>
+            <button onClick={() => onNavigate('landing')} className="hover:text-amber-400 cursor-pointer">Beranda</button>
+            <button onClick={() => onNavigate('login')} className="hover:text-amber-400 cursor-pointer">Login Aplikasi</button>
+            <button onClick={handleStartDemo} className="hover:text-amber-400 cursor-pointer">Mode Demo 6 Jam</button>
+            <button onClick={() => onNavigate('control-panel')} className="text-emerald-400 hover:text-emerald-300 font-extrabold cursor-pointer flex items-center gap-1">
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Control Panel CRM</span>
+            </button>
           </div>
         </div>
       </footer>

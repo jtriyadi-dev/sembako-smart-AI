@@ -49,6 +49,31 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+// Helper to ensure every product object has non-null/non-undefined required properties
+function sanitizeProduct(p: any, idx: number = 0): ProdukItem {
+  const id = String(p?.id || `prod-${Date.now()}-${idx}`);
+  const kodeStr = p?.kode ? String(p.kode) : `SKU-${id.substring(0, 5).toUpperCase()}`;
+  return {
+    id,
+    kode: kodeStr,
+    barcode: p?.barcode ? String(p.barcode) : '',
+    nama: p?.nama ? String(p.nama) : 'Produk Sembako',
+    kategori: p?.kategori ? String(p.kategori) : 'Sembako Utama',
+    hargaBeli: Number(p?.hargaBeli) || 0,
+    hargaJual: Number(p?.hargaJual) || 0,
+    stok: Number(p?.stok) || 0,
+    minStok: Number(p?.minStok) || 5,
+    satuan: p?.satuan ? String(p.satuan) : 'Pcs',
+    gambarUrl: p?.gambarUrl ? String(p.gambarUrl) : '',
+    deskripsi: p?.deskripsi ? String(p.deskripsi) : '',
+    expiredDate: p?.expiredDate ? String(p.expiredDate) : '',
+    batchNo: p?.batchNo ? String(p.batchNo) : '',
+    terjual: Number(p?.terjual) || 0,
+    createdAt: p?.createdAt ? String(p.createdAt) : new Date().toISOString(),
+    updatedAt: p?.updatedAt ? String(p.updatedAt) : new Date().toISOString(),
+  };
+}
+
 // Fast direct REST API fetch for instant (<100ms) product loading from Express Server + Cloud Store
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
 
@@ -60,10 +85,11 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       if (serverRes.ok) {
         const data = await serverRes.json();
         if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+          const cleanProds = data.products.map(sanitizeProduct);
           try {
-            localStorage.setItem('sembako_cached_products', JSON.stringify(data.products));
+            localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
           } catch (e) {}
-          return data.products;
+          return cleanProds;
         }
       }
     } catch (e) {
@@ -77,10 +103,11 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
         const cloudJson = await cloudRes.json();
         const prods = cloudJson?.data?.products;
         if (Array.isArray(prods) && prods.length > 0) {
+          const cleanProds = prods.map(sanitizeProduct);
           try {
-            localStorage.setItem('sembako_cached_products', JSON.stringify(prods));
+            localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
           } catch (e) {}
-          return prods;
+          return cleanProds;
         }
       }
     } catch (e) {
@@ -93,7 +120,7 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map(sanitizeProduct);
         }
       }
     } catch (e) {}

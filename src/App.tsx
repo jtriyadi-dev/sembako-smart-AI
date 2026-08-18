@@ -3,6 +3,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { StoreProvider } from './context/StoreContext';
+import { RemoteConfigProvider, useRemoteConfig } from './context/RemoteConfigContext';
 import { PageId } from './types';
 
 // Global Layout Components
@@ -31,12 +32,14 @@ import { TransaksiPage } from './pages/TransaksiPage';
 import { LaporanPage } from './pages/LaporanPage';
 import { AIAssistantPage } from './pages/AIAssistantPage';
 import { SettingPage } from './pages/SettingPage';
+import { ControlPanelPage } from './pages/ControlPanelPage';
 
 import { motion, AnimatePresence } from 'motion/react';
 
 const MainAppContent: React.FC = () => {
   const { user, profile, loading, isDemoSession } = useAuth();
   const { licenseInfo } = useStore();
+  const { config, isDevAuth } = useRemoteConfig();
   const [currentPage, setCurrentPage] = useState<PageId>('landing');
 
   // Modal States
@@ -54,6 +57,16 @@ const MainAppContent: React.FC = () => {
 
   if (loading) {
     return <LoadingSpinner fullScreen label="Memuat Sembako Smart AI..." />;
+  }
+
+  // Developer Control Panel (Super Admin)
+  if (currentPage === 'control-panel') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 sm:p-6 lg:p-8">
+        <ToastContainer />
+        <ControlPanelPage onNavigate={setCurrentPage} />
+      </div>
+    );
   }
 
   // 1. Landing Page
@@ -77,7 +90,7 @@ const MainAppContent: React.FC = () => {
   }
 
   // 3. Menu Aktivasi Lisensi (For new users with unactivated license)
-  const isActivated = licenseInfo.isActivated || isDemoSession;
+  const isActivated = licenseInfo.isActivated || isDemoSession || isDevAuth;
   if (currentPage === 'activation' || !isActivated) {
     return (
       <div className="min-h-screen bg-slate-950 text-white font-sans">
@@ -179,11 +192,13 @@ export default function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <ToastProvider>
-          <AuthProvider>
-            <StoreProvider>
-              <MainAppContent />
-            </StoreProvider>
-          </AuthProvider>
+          <RemoteConfigProvider>
+            <AuthProvider>
+              <StoreProvider>
+                <MainAppContent />
+              </StoreProvider>
+            </AuthProvider>
+          </RemoteConfigProvider>
         </ToastProvider>
       </ThemeProvider>
     </ErrorBoundary>

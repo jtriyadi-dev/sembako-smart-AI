@@ -195,6 +195,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(false);
   };
 
+  const handleLogin = async (email: string, pass: string) => {
+    try {
+      // 1. Try Firebase Auth first
+      return await loginWithEmail(email, pass);
+    } catch (fbErr: any) {
+      console.warn('Firebase login failed, checking CRM customer database...', fbErr?.message);
+      
+      // 2. Fallback to Server CRM Database (Created via Control Panel)
+      try {
+        const res = await fetch('/api/auth/crm-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: pass }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.user) {
+          const crmUser = data.user;
+          const mockAuthUser = {
+            uid: crmUser.id || 'crm-' + Date.now(),
+            email: crmUser.email,
+            displayName: crmUser.namaPemilik,
+            photoURL: null,
+          } as User;
+
+          setUser(mockAuthUser);
+          setProfile({
+            uid: mockAuthUser.uid,
+            email: crmUser.email,
+            displayName: crmUser.namaPemilik,
+            photoURL: null,
+            namaToko: crmUser.namaToko || 'Toko Sembako',
+            role: crmUser.role || 'owner',
+            alamatToko: '',
+            noHp: crmUser.noHp || '',
+          });
+
+          // Also set license key in localStorage if user has a valid key
+          if (crmUser.licenseKey) {
+            localStorage.setItem('sembako_license_key', crmUser.licenseKey);
+            localStorage.setItem('sembako_license_owner', crmUser.namaPemilik);
+            localStorage.setItem('sembako_license_store', crmUser.namaToko);
+          }
+
+          setIsDemoSession(false);
+          return { user: mockAuthUser } as any;
+        } else {
+          throw new Error(data.message || fbErr.message || 'Login gagal.');
+        }
+      } catch (crmErr: any) {
+        throw new Error(crmErr.message || fbErr.message || 'Email atau kata sandi tidak cocok.');
+      }
+    }
+  };
+
   const handleLogout = async () => {
     if (isDemoSession) {
       localStorage.removeItem('sembako_demo_session');
@@ -204,6 +258,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(null);
     } else {
       await logoutUser();
+      setUser(null);
+      setProfile(null);
     }
   };
 
@@ -213,7 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         profile,
         loading,
-        login: loginWithEmail,
+        login: handleLogin as any,
         signup: registerWithEmail,
         loginGoogle: loginWithGoogle,
         logout: handleLogout,

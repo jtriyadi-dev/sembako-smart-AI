@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { PageId } from '../types';
 import { EditStoreModal } from './EditStoreModal';
 import { LicenseModal } from './LicenseModal';
-import { Sun, Moon, Bell, Store, Sparkles, User as UserIcon, LogOut, HelpCircle, BookOpen, Edit3, KeyRound, Award, Wifi, WifiOff, Clock, RotateCcw, ShieldAlert, Globe } from 'lucide-react';
+import { Sun, Moon, Bell, Store, Sparkles, User as UserIcon, LogOut, HelpCircle, BookOpen, Edit3, KeyRound, Award, Wifi, WifiOff, Clock, RotateCcw, ShieldAlert, Globe, Sliders } from 'lucide-react';
 
 interface HeaderProps {
   currentPage: PageId;
@@ -181,6 +181,15 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, onOpenDoc, onOpenOnb
 
           {/* Right Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+
+          {/* Control Panel (Developer) Button */}
+          <button
+            onClick={() => onNavigate('control-panel')}
+            className="p-2 sm:p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500/40 transition-all shadow-sm cursor-pointer"
+            title="Buka Control Panel Developer & CRM"
+          >
+            <Sliders className="w-4 h-4" />
+          </button>
 
           {/* Notification Bell */}
           <button

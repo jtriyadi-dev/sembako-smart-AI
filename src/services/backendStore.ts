@@ -1,16 +1,123 @@
 import fs from 'fs';
 import path from 'path';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
-import { ProdukItem } from '../types';
+import { ProdukItem, RemoteAppConfig, CrmUser, DeveloperApiKeys } from '../types';
+import { DEFAULT_REMOTE_CONFIG, INITIAL_CRM_USERS, DEFAULT_API_KEYS } from '../data/defaultRemoteConfig';
 
 const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
 const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
 const BASE_FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 
-// Local file path for persistent server storage (/tmp for Vercel Serverless, local directory for local dev)
+// Local file paths for persistent server storage
 const LOCAL_PRODUCTS_FILE = path.join('/tmp', 'localProducts.json');
 const SEED_PRODUCTS_FILE = path.join(process.cwd(), 'src', 'data', 'localProducts.json');
+const LOCAL_CONFIG_FILE = path.join('/tmp', 'remoteConfig.json');
+const LOCAL_USERS_FILE = path.join('/tmp', 'crmUsers.json');
+const LOCAL_KEYS_FILE = path.join('/tmp', 'apiKeys.json');
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
+
+// In-memory developer stores
+let inMemoryRemoteConfig: RemoteAppConfig = { ...DEFAULT_REMOTE_CONFIG };
+let inMemoryCrmUsers: CrmUser[] = [...INITIAL_CRM_USERS];
+let inMemoryApiKeys: DeveloperApiKeys = {
+  ...DEFAULT_API_KEYS,
+  geminiApiKey: process.env.GEMINI_API_KEY || DEFAULT_API_KEYS.geminiApiKey,
+};
+
+function loadDeveloperStoresFromFile(): void {
+  try {
+    if (fs.existsSync(LOCAL_CONFIG_FILE)) {
+      const data = fs.readFileSync(LOCAL_CONFIG_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (parsed && parsed.version) inMemoryRemoteConfig = { ...DEFAULT_REMOTE_CONFIG, ...parsed };
+    }
+    if (fs.existsSync(LOCAL_USERS_FILE)) {
+      const data = fs.readFileSync(LOCAL_USERS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) inMemoryCrmUsers = parsed;
+    }
+    if (fs.existsSync(LOCAL_KEYS_FILE)) {
+      const data = fs.readFileSync(LOCAL_KEYS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (parsed) inMemoryApiKeys = { ...DEFAULT_API_KEYS, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[BackendStore] Error loading dev stores from file:', e);
+  }
+}
+
+function saveDeveloperStoresToFile(): void {
+  try {
+    const dir = path.dirname(LOCAL_CONFIG_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LOCAL_CONFIG_FILE, JSON.stringify(inMemoryRemoteConfig, null, 2), 'utf-8');
+    fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(inMemoryCrmUsers, null, 2), 'utf-8');
+    fs.writeFileSync(LOCAL_KEYS_FILE, JSON.stringify(inMemoryApiKeys, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[BackendStore] Error saving dev stores to file:', e);
+  }
+}
+
+loadDeveloperStoresFromFile();
+
+export function getRemoteConfigBackend(): RemoteAppConfig {
+  return inMemoryRemoteConfig;
+}
+
+export function saveRemoteConfigBackend(config: RemoteAppConfig): RemoteAppConfig {
+  inMemoryRemoteConfig = {
+    ...inMemoryRemoteConfig,
+    ...config,
+    version: (inMemoryRemoteConfig.version || 1) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  saveDeveloperStoresToFile();
+  return inMemoryRemoteConfig;
+}
+
+export function getCrmUsersBackend(): CrmUser[] {
+  return [...inMemoryCrmUsers];
+}
+
+export function saveCrmUserBackend(user: CrmUser): CrmUser {
+  const existingIdx = inMemoryCrmUsers.findIndex(u => u.id === user.id);
+  const now = new Date().toISOString();
+  let saved: CrmUser;
+  if (existingIdx >= 0) {
+    saved = { ...inMemoryCrmUsers[existingIdx], ...user, updatedAt: now };
+    inMemoryCrmUsers[existingIdx] = saved;
+  } else {
+    saved = { ...user, createdAt: user.createdAt || now, updatedAt: now };
+    inMemoryCrmUsers.unshift(saved);
+  }
+  saveDeveloperStoresToFile();
+  return saved;
+}
+
+export function deleteCrmUserBackend(userId: string): boolean {
+  const initialLen = inMemoryCrmUsers.length;
+  inMemoryCrmUsers = inMemoryCrmUsers.filter(u => u.id !== userId);
+  saveDeveloperStoresToFile();
+  return inMemoryCrmUsers.length < initialLen;
+}
+
+export function getApiKeysBackend(): DeveloperApiKeys {
+  return { ...inMemoryApiKeys };
+}
+
+export function saveApiKeysBackend(keys: Partial<DeveloperApiKeys>): DeveloperApiKeys {
+  inMemoryApiKeys = {
+    ...inMemoryApiKeys,
+    ...keys,
+    updatedAt: new Date().toISOString(),
+  };
+  // Update process.env if geminiApiKey provided
+  if (keys.geminiApiKey) {
+    process.env.GEMINI_API_KEY = keys.geminiApiKey;
+  }
+  saveDeveloperStoresToFile();
+  return { ...inMemoryApiKeys };
+}
 
 async function syncToCloudStore(products: ProdukItem[]): Promise<void> {
   try {

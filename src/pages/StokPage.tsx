@@ -577,7 +577,7 @@ export const StokPage: React.FC = () => {
                                   {p.gambarUrl ? (
                                     <img src={p.gambarUrl} alt={p.nama} className="w-full h-full object-cover" />
                                   ) : (
-                                    p.kode.substring(0, 3)
+                                    (p.kode || p.nama || 'SKU').substring(0, 3)
                                   )}
                                 </div>
                                 <div>
@@ -585,7 +585,7 @@ export const StokPage: React.FC = () => {
                                     {p.nama}
                                   </h4>
                                   <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                                    <span>SKU: {p.kode}</span>
+                                    <span>SKU: {p.kode || '-'}</span>
                                     <span>•</span>
                                     <span>{p.kategori}</span>
                                   </div>

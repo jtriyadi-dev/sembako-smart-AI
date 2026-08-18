@@ -10,7 +10,8 @@ export type PageId =
   | 'transaksi'
   | 'laporan'
   | 'ai-assistant'
-  | 'setting';
+  | 'setting'
+  | 'control-panel';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -19,7 +20,7 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  role?: 'owner' | 'kasir' | 'admin';
+  role?: 'owner' | 'kasir' | 'admin' | 'developer';
   namaToko?: string;
   alamatToko?: string;
   noHp?: string;
@@ -179,4 +180,148 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   isAiSuggestedAction?: boolean;
+}
+
+// ==========================================
+// DEVELOPER CRM & LIVE REMOTE CONFIG TYPES
+// ==========================================
+
+export type CrmUserPlan = 'trial_6h' | 'pro_lifetime' | 'enterprise' | 'custom';
+export type CrmUserStatus = 'aktif' | 'suspended' | 'expired' | 'pending';
+
+export interface CrmUser {
+  id: string;
+  namaPemilik: string;
+  namaToko: string;
+  email: string;
+  password?: string;
+  noHp: string;
+  alamatToko?: string;
+  plan: CrmUserPlan;
+  status: CrmUserStatus;
+  licenseKey: string;
+  deviceLimit: number;
+  activeDevicesCount: number;
+  role: 'owner' | 'admin' | 'kasir';
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null; // ISO string or null for lifetime
+  lastLoginAt?: string;
+  totalTransactions?: number;
+}
+
+export interface VideoShowcaseItem {
+  id: string;
+  title: string;
+  description: string;
+  videoUrl: string; // YouTube / MP4 / Loom
+  thumbnailUrl: string;
+  isFeatured: boolean;
+  platform: 'youtube' | 'mp4' | 'loom';
+}
+
+export interface ImageGalleryItem {
+  id: string;
+  title: string;
+  url: string;
+  category?: string;
+}
+
+export interface RemoteAppConfig {
+  version: number;
+  updatedAt: string;
+  updatedBy: string;
+  
+  // 1. App Identity & Branding
+  branding: {
+    appName: string;
+    appSubtitle: string;
+    tagline: string;
+    logoUrl: string;
+    faviconUrl: string;
+    supportWa: string;
+    supportEmail: string;
+    officialWebsite: string;
+  };
+
+  // 2. Landing Page Hero Section
+  hero: {
+    badgeText: string;
+    headline: string;
+    headlineHighlight: string;
+    subheadline: string;
+    ctaPrimaryText: string;
+    ctaSecondaryText: string;
+    ratingScore: string;
+    ratingCountText: string;
+    usersCountText: string;
+  };
+
+  // 3. Announcement Top Bar
+  announcement: {
+    enabled: boolean;
+    badgeText: string;
+    message: string;
+    linkText: string;
+    linkUrl: string;
+    theme: 'emerald' | 'amber' | 'indigo' | 'rose' | 'slate';
+  };
+
+  // 4. Maintenance / Live Notice
+  maintenance: {
+    enabled: boolean;
+    title: string;
+    message: string;
+    estimatedEndTime?: string;
+    allowDevBypass: boolean;
+  };
+
+  // 5. Media CMS (Images & Video Tutorial Showcase)
+  media: {
+    heroBannerImage: string;
+    promoBannerImage: string;
+    videos: VideoShowcaseItem[];
+    galleryImages: ImageGalleryItem[];
+  };
+
+  // 6. Pricing & Promo Package CMS
+  pricing: {
+    promoBadge: string;
+    promoTitle: string;
+    promoPrice: number;
+    normalPrice: number;
+    discountPercent: number;
+    priceNote: string;
+    checkoutWaText: string;
+    featuresList: string[];
+  };
+
+  // 7. Dynamic FAQs
+  faqs: Array<{
+    id: string;
+    q: string;
+    a: string;
+  }>;
+
+  // 8. Global Feature Flags
+  featureFlags: {
+    enableAiAssistant: boolean;
+    enableWhatsAppBot: boolean;
+    enableBarcodeScanner: boolean;
+    enableOfflineSync: boolean;
+    enableCustomerReceiptWa: boolean;
+  };
+}
+
+export interface DeveloperApiKeys {
+  geminiApiKey: string;
+  geminiModel: string;
+  waGatewayProvider: 'fonnte' | 'wablas' | 'whacenter' | 'custom';
+  waApiKey: string;
+  waSenderNumber: string;
+  waWebhookUrl: string;
+  paymentGatewayKey: string;
+  cloudSyncUrl: string;
+  updatedAt: string;
 }

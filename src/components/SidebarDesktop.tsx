@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Globe,
+  Sliders,
 } from 'lucide-react';
 
 interface SidebarDesktopProps {
@@ -53,6 +54,7 @@ export const SidebarDesktop: React.FC<SidebarDesktopProps> = ({ currentPage, onN
     { id: 'laporan' as PageId, label: 'Laporan', icon: BarChart3 },
     { id: 'ai-assistant' as PageId, label: 'AI Assistant', icon: Sparkles, isAi: true },
     { id: 'setting' as PageId, label: 'Setting', icon: Settings },
+    { id: 'control-panel' as PageId, label: 'Control Panel', icon: Sliders, badge: 'Dev' },
   ];
 
   return (

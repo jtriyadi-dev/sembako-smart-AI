@@ -104,17 +104,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   <img src={scannedResult.gambarUrl} alt={scannedResult.nama} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center font-bold text-xs text-slate-400">
-                    {scannedResult.kode.substring(0, 3)}
+                    {(scannedResult.kode || scannedResult.nama || 'SKU').substring(0, 3)}
                   </div>
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{scannedResult.nama}</p>
                 <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
-                  Rp {scannedResult.hargaJual.toLocaleString('id-ID')}
+                  Rp {(scannedResult.hargaJual || 0).toLocaleString('id-ID')}
                 </p>
                 <p className="text-[10px] text-slate-500 font-mono">
-                  {scannedResult.kode} | Barcode: {scannedResult.barcode || '-'}
+                  {scannedResult.kode || '-'} | Barcode: {scannedResult.barcode || '-'}
                 </p>
               </div>
             </div>
