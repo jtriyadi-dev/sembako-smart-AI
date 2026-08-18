@@ -21,10 +21,36 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handlePostAuthNavigate = () => {
-    if (!licenseInfo.isActivated && !isDemoSession) {
-      onNavigate('activation');
-    } else {
+    const devAuth = localStorage.getItem('sembako_developer_auth_session');
+    const licenseInfoSaved = localStorage.getItem('sembako_license_info');
+    let isAct = licenseInfo.isActivated;
+    if (licenseInfoSaved) {
+      try {
+        const p = JSON.parse(licenseInfoSaved);
+        if (p.isActivated) isAct = true;
+      } catch (e) {}
+    }
+    if (devAuth === 'true' || isAct || isDemoSession) {
       onNavigate('dashboard');
+    } else {
+      onNavigate('activation');
+    }
+  };
+
+  const handleDeveloperQuickLogin = async () => {
+    setEmail('developer@sembakosmart.id');
+    setPassword('password123');
+    setSubmitting(true);
+    setAuthError(null);
+    try {
+      await login('developer@sembakosmart.id', 'password123');
+      success('Selamat Datang Developer', 'Masuk sebagai Super Admin Developer Sembako Smart AI.');
+      handlePostAuthNavigate();
+    } catch (err: any) {
+      setAuthError(err.message || 'Gagal login developer.');
+      error('Gagal Login', err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -247,6 +273,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               <p className="text-[10px] text-slate-400 text-center font-mono">
                 ⏱️ Akses demo aktif selama 6 jam. Setelah 6 jam, semua data di-reset kembali kosong/awal.
               </p>
+            </div>
+
+            {/* Developer Super Admin Instant Access */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleDeveloperQuickLogin}
+                className="w-full py-2 px-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-600 dark:text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              >
+                <ShieldCheck className="w-4 h-4 text-purple-500 shrink-0" />
+                <span>Masuk Cepat: Developer (Super Admin)</span>
+              </button>
             </div>
           </div>
 
