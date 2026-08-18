@@ -17,6 +17,21 @@ export type ThemeMode = 'light' | 'dark';
 
 export type UserRole = 'developer' | 'owner' | 'admin' | 'kasir';
 
+export interface StaffAccount {
+  id: string;
+  username: string; // e.g. 'kasir1', 'admin_toko'
+  nama: string; // e.g. 'Siti Rahma'
+  password?: string; // e.g. '123456'
+  role: 'admin' | 'kasir';
+  noHp?: string;
+  email?: string;
+  status: 'aktif' | 'nonaktif';
+  createdAt: string;
+  updatedAt?: string;
+  lastLogin?: string;
+  catatan?: string;
+}
+
 export interface UserProfile {
   uid: string;
   email: string | null;

@@ -9,7 +9,8 @@ import { Modal } from '../components/Modal';
 import { subscribeProducts, addProduct, updateProduct, deleteProduct, clearAllDatabaseData, seedSampleProducts } from '../services/productService';
 import { subscribeSuppliers, seedSampleSuppliers } from '../services/supplierService';
 import { subscribeTransactions } from '../services/transaksiService';
-import { ProdukItem, TransaksiItem, PageId } from '../types';
+import { subscribeStaffAccounts, addStaffAccount, updateStaffAccount, deleteStaffAccount } from '../services/staffService';
+import { ProdukItem, TransaksiItem, PageId, StaffAccount } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
 import { processImageFile } from '../utils/imageUtils';
 import { playScannerBeep } from '../utils/audioUtils';
@@ -81,6 +82,14 @@ import {
   Boxes,
   Search,
   Sliders,
+  Users,
+  UserPlus,
+  UserCheck,
+  UserX,
+  Lock,
+  Eye,
+  EyeOff,
+  Key,
 } from 'lucide-react';
 
 export type { StoreConfig };
@@ -119,7 +128,154 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
   const { storeConfig, updateStoreConfig, licenseInfo, activateLicenseKey, deactivateLicense } = useStore();
 
   // Active Tab State
-  const [activeTab, setActiveTab] = useState<'profil' | 'whatsapp' | 'printer' | 'barcode' | 'lisensi' | 'panduan' | 'tema' | 'backup' | 'import' | 'reset' | 'tentang'>('profil');
+  const [activeTab, setActiveTab] = useState<'profil' | 'pegawai' | 'whatsapp' | 'printer' | 'barcode' | 'lisensi' | 'panduan' | 'tema' | 'backup' | 'import' | 'reset' | 'tentang'>('profil');
+
+  // Staff Accounts Management State
+  const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>([]);
+  const [staffSearchQuery, setStaffSearchQuery] = useState('');
+  const [staffRoleFilter, setStaffRoleFilter] = useState<'all' | 'admin' | 'kasir'>('all');
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffAccount | null>(null);
+  const [staffFormData, setStaffFormData] = useState({
+    nama: '',
+    username: '',
+    password: '',
+    role: 'kasir' as 'admin' | 'kasir',
+    noHp: '',
+    status: 'aktif' as 'aktif' | 'nonaktif',
+    catatan: '',
+  });
+  const [showFormPassword, setShowFormPassword] = useState(false);
+  const [revealedPasswordId, setRevealedPasswordId] = useState<string | null>(null);
+  const [staffDeleteConfirm, setStaffDeleteConfirm] = useState<StaffAccount | null>(null);
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
+
+  // Subscribe to staff accounts from Cloud Firestore & Local Cache
+  useEffect(() => {
+    const unsubscribe = subscribeStaffAccounts((accounts) => {
+      setStaffAccounts(accounts);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const isOwnerOrDev = !profile?.role || profile.role === 'owner' || profile.role === 'developer';
+
+  const handleOpenAddStaff = () => {
+    setEditingStaff(null);
+    setStaffFormData({
+      nama: '',
+      username: '',
+      password: '',
+      role: 'kasir',
+      noHp: '',
+      status: 'aktif',
+      catatan: '',
+    });
+    setShowFormPassword(false);
+    setIsStaffModalOpen(true);
+  };
+
+  const handleOpenEditStaff = (staff: StaffAccount) => {
+    setEditingStaff(staff);
+    setStaffFormData({
+      nama: staff.nama,
+      username: staff.username,
+      password: staff.password || '',
+      role: staff.role,
+      noHp: staff.noHp || '',
+      status: staff.status || 'aktif',
+      catatan: staff.catatan || '',
+    });
+    setShowFormPassword(false);
+    setIsStaffModalOpen(true);
+  };
+
+  const handleSaveStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!staffFormData.nama.trim() || !staffFormData.username.trim()) {
+      warning('Input Kurang', 'Nama lengkap dan Username wajib diisi.');
+      return;
+    }
+
+    if (!editingStaff && !staffFormData.password.trim()) {
+      warning('Password Wajib', 'Tentukan kata sandi awal untuk akun pegawai baru.');
+      return;
+    }
+
+    setIsSavingStaff(true);
+    try {
+      if (editingStaff) {
+        await updateStaffAccount(editingStaff.id, {
+          nama: staffFormData.nama.trim(),
+          username: staffFormData.username.trim(),
+          ...(staffFormData.password.trim() ? { password: staffFormData.password.trim() } : {}),
+          role: staffFormData.role,
+          noHp: staffFormData.noHp.trim(),
+          status: staffFormData.status,
+          catatan: staffFormData.catatan.trim(),
+        });
+        success('Akun Diperbarui', `Data akun ${staffFormData.nama} (${staffFormData.role.toUpperCase()}) berhasil disimpan.`);
+      } else {
+        await addStaffAccount({
+          nama: staffFormData.nama.trim(),
+          username: staffFormData.username.trim(),
+          password: staffFormData.password.trim(),
+          role: staffFormData.role,
+          noHp: staffFormData.noHp.trim(),
+          status: staffFormData.status,
+          catatan: staffFormData.catatan.trim(),
+        });
+        success('Akun Pegawai Dibuat', `Akun ${staffFormData.role.toUpperCase()} "${staffFormData.username}" siap digunakan untuk login.`);
+      }
+      setIsStaffModalOpen(false);
+    } catch (err: any) {
+      toastError('Gagal Menyimpan Akun', err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingStaff(false);
+    }
+  };
+
+  const handleToggleStaffStatus = async (staff: StaffAccount) => {
+    const nextStatus = staff.status === 'aktif' ? 'nonaktif' : 'aktif';
+    try {
+      await updateStaffAccount(staff.id, { status: nextStatus });
+      info(
+        `Status Diubah`,
+        `Akun ${staff.nama} kini berstatus ${nextStatus.toUpperCase()}.`
+      );
+    } catch (err: any) {
+      toastError('Gagal Mengubah Status', err.message);
+    }
+  };
+
+  const handleDeleteStaff = async (staff: StaffAccount) => {
+    try {
+      await deleteStaffAccount(staff.id);
+      success('Akun Dihapus', `Akun pegawai ${staff.nama} (@${staff.username}) telah dihapus.`);
+      setStaffDeleteConfirm(null);
+    } catch (err: any) {
+      toastError('Gagal Menghapus', err.message);
+    }
+  };
+
+  const handleCopyStaffCredentials = (staff: StaffAccount) => {
+    const pass = staff.password || 'password123';
+    const text = `*AKUN LOGIN TOKO SEMBAKO SMART AI*\n━━━━━━━━━━━━━━━━━━━━\n🏪 *Toko:* ${storeConfig.namaToko || 'Sembako Smart'}\n👤 *Nama:* ${staff.nama}\n🔑 *Username:* ${staff.username}\n🔒 *Password:* ${pass}\n🛡️ *Hak Akses / Role:* ${staff.role.toUpperCase()} (${staff.role === 'admin' ? 'Admin Pengelola' : 'Kasir POS'})\n🌐 *Link Aplikasi:* ${window.location.origin}\n━━━━━━━━━━━━━━━━━━━━\n_Harap jaga kerahasiaan kata sandi Anda._`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      success('Info Akun Disalin', `Informasi login @${staff.username} berhasil disalin ke clipboard.`);
+    });
+  };
+
+  const handleSendToWhatsApp = (staff: StaffAccount) => {
+    const pass = staff.password || 'password123';
+    const text = `Halo ${staff.nama}, berikut informasi akun login Anda untuk aplikasi kasir toko:\n\n🏪 Toko: ${storeConfig.namaToko || 'Sembako Smart'}\n👤 Username: ${staff.username}\n🔒 Password: ${pass}\n🛡️ Role: ${staff.role.toUpperCase()}\n🌐 Buka di: ${window.location.origin}\n\nSilakan login menggunakan username dan password di atas.`;
+    const cleanPhone = (staff.noHp || '').replace(/[^0-9]/g, '');
+    const waUrl = cleanPhone
+      ? `https://wa.me/${cleanPhone.startsWith('0') ? '62' + cleanPhone.slice(1) : cleanPhone}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  };
 
   // Tab Bar Horizontal Scroll Ref & Indicator State
   const scrollTabRef = useRef<HTMLDivElement>(null);
@@ -770,6 +926,7 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
         >
           {[
             { id: 'profil', label: 'Profil Toko', icon: Store },
+            { id: 'pegawai', label: 'Pegawai & Kasir', icon: Users },
             { id: 'whatsapp', label: 'WhatsApp Bot & Notif', icon: MessageSquare },
             ...(!isDemoSession ? [{ id: 'lisensi', label: 'Lisensi Software', icon: KeyRound }] : []),
             { id: 'panduan', label: 'Panduan & Manual', icon: BookOpen },
@@ -1067,6 +1224,391 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
               </button>
             </div>
           </form>
+        </motion.div>
+      )}
+
+      {/* TAB 2: KELOLA AKUN PEGAWAI (ADMIN & KASIR) */}
+      {activeTab === 'pegawai' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl border border-emerald-500/20 shadow-xl space-y-6"
+        >
+          {/* Header Banner */}
+          <div className="border-b border-slate-200 dark:border-slate-800 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 mb-1.5">
+                <Users className="w-3.5 h-3.5 text-blue-500" />
+                <span>Hak Akses & Akun Karyawan</span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+                Kelola Akun Pegawai (Admin & Kasir POS)
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Buat dan kelola username serta password untuk kasir dan staf toko Anda agar dapat login di perangkat masing-masing.
+              </p>
+            </div>
+
+            {isOwnerOrDev && (
+              <button
+                type="button"
+                onClick={handleOpenAddStaff}
+                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-emerald-800 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-900/20 cursor-pointer shrink-0 transition-transform active:scale-95"
+              >
+                <UserPlus className="w-4 h-4 text-amber-300" />
+                <span>+ Buat Akun Pegawai Baru</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quick Stat Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-black text-slate-900 dark:text-white">
+                  {staffAccounts.length}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500">Total Pegawai</div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-black text-blue-600 dark:text-blue-400">
+                  {staffAccounts.filter((s) => s.role === 'admin').length}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500">Admin Toko</div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                <ShoppingCart className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
+                  {staffAccounts.filter((s) => s.role === 'kasir').length}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500">Kasir POS</div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
+                  {staffAccounts.filter((s) => s.status === 'aktif').length}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500">Akun Aktif</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Filter Toolbar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                value={staffSearchQuery}
+                onChange={(e) => setStaffSearchQuery(e.target.value)}
+                placeholder="Cari nama atau username..."
+                className="w-full pl-9 pr-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  staffRoleFilter === 'all'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                Semua ({staffAccounts.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter('admin')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  staffRoleFilter === 'admin'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                Admin ({staffAccounts.filter((s) => s.role === 'admin').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter('kasir')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  staffRoleFilter === 'kasir'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                Kasir ({staffAccounts.filter((s) => s.role === 'kasir').length})
+              </button>
+            </div>
+          </div>
+
+          {/* Staff List Cards */}
+          {(() => {
+            const filtered = staffAccounts.filter((staff) => {
+              const matchesSearch =
+                staff.nama.toLowerCase().includes(staffSearchQuery.toLowerCase()) ||
+                staff.username.toLowerCase().includes(staffSearchQuery.toLowerCase()) ||
+                (staff.noHp && staff.noHp.includes(staffSearchQuery));
+              const matchesRole = staffRoleFilter === 'all' || staff.role === staffRoleFilter;
+              return matchesSearch && matchesRole;
+            });
+
+            if (filtered.length === 0) {
+              return (
+                <div className="p-12 text-center rounded-3xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+                    <UserX className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                    Tidak Ditemukan Akun Pegawai
+                  </h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    {staffSearchQuery
+                      ? 'Tidak ada akun yang sesuai dengan kata kunci pencarian.'
+                      : 'Belum ada akun admin atau kasir yang terdaftar. Klik tombol Tambah untuk membuat akun pegawai pertama.'}
+                  </p>
+                  {isOwnerOrDev && (
+                    <button
+                      type="button"
+                      onClick={handleOpenAddStaff}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer inline-flex items-center gap-1.5 shadow-md"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Tambah Akun Pegawai Sekarang</span>
+                    </button>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filtered.map((staff) => {
+                  const isPasswordRevealed = revealedPasswordId === staff.id;
+                  const isKasir = staff.role === 'kasir';
+                  const isAktif = staff.status === 'aktif';
+
+                  return (
+                    <div
+                      key={staff.id}
+                      className={`p-5 rounded-3xl border transition-all ${
+                        isAktif
+                          ? 'bg-white dark:bg-slate-950/90 border-slate-200 dark:border-slate-800 shadow-md hover:border-emerald-500/40'
+                          : 'bg-slate-100/70 dark:bg-slate-900/40 border-slate-300/60 dark:border-slate-800/60 opacity-80'
+                      } space-y-4 flex flex-col justify-between`}
+                    >
+                      <div>
+                        {/* Top: Role & Status */}
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                                isKasir
+                                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                                  : 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30'
+                              }`}
+                            >
+                              {isKasir ? '🛒 KASIR POS' : '🛡️ ADMIN TOKO'}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                isAktif
+                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                              }`}
+                            >
+                              {isAktif ? '● Aktif' : '○ Nonaktif'}
+                            </span>
+                          </div>
+
+                          {/* Action Icon for Quick Copy */}
+                          <button
+                            type="button"
+                            onClick={() => handleCopyStaffCredentials(staff)}
+                            title="Salin Kredensial Akun (Username & Password)"
+                            className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Middle: Profile Info */}
+                        <div className="flex items-start gap-3.5">
+                          <div
+                            className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-base shrink-0 border ${
+                              isKasir
+                                ? 'bg-gradient-to-br from-emerald-500/20 to-teal-500/30 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                : 'bg-gradient-to-br from-blue-500/20 to-indigo-500/30 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                            }`}
+                          >
+                            {staff.nama.charAt(0).toUpperCase()}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                              {staff.nama}
+                            </h4>
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono mt-0.5">
+                              <span>Username:</span>
+                              <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 rounded">
+                                @{staff.username}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Credentials Details Box */}
+                        <div className="mt-4 p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500 text-[11px] font-semibold flex items-center gap-1">
+                              <Lock className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Kata Sandi:</span>
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                                {isPasswordRevealed ? staff.password || 'password123' : '••••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRevealedPasswordId(isPasswordRevealed ? null : staff.id)
+                                }
+                                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                title={isPasswordRevealed ? 'Sembunyikan password' : 'Lihat password'}
+                              >
+                                {isPasswordRevealed ? (
+                                  <EyeOff className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Eye className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+
+                          {staff.noHp && (
+                            <div className="flex items-center justify-between border-t border-slate-200/60 dark:border-slate-800/60 pt-2">
+                              <span className="text-slate-500 text-[11px] font-semibold flex items-center gap-1">
+                                <Phone className="w-3.5 h-3.5 text-slate-400" />
+                                <span>No. WhatsApp:</span>
+                              </span>
+                              <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                                {staff.noHp}
+                              </span>
+                            </div>
+                          )}
+
+                          {staff.catatan && (
+                            <div className="border-t border-slate-200/60 dark:border-slate-800/60 pt-2 text-[11px] text-slate-500 italic">
+                              "{staff.catatan}"
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom Action Buttons */}
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSendToWhatsApp(staff)}
+                            className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Kirim kredensial login ke WhatsApp Pegawai"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Kirim WA</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyStaffCredentials(staff)}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Salin info akun ke clipboard"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Salin</span>
+                          </button>
+                        </div>
+
+                        {isOwnerOrDev && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStaffStatus(staff)}
+                              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                                isAktif
+                                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
+                              }`}
+                              title={isAktif ? 'Nonaktifkan akun pegawai ini' : 'Aktifkan kembali akun ini'}
+                            >
+                              {isAktif ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditStaff(staff)}
+                              className="p-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 cursor-pointer"
+                              title="Edit data akun & ubah kata sandi"
+                            >
+                              <Settings className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setStaffDeleteConfirm(staff)}
+                              className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 cursor-pointer"
+                              title="Hapus akun pegawai"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Guide Note */}
+          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-500/20 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+            <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4" />
+              <span>Petunjuk Hak Akses Pegawai:</span>
+            </div>
+            <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+              <li>
+                <strong>Admin Toko:</strong> Memiliki wewenang mengelola katalog produk, stok masuk/keluar, supplier, laporan penjualan, dan transaksi kasir POS.
+              </li>
+              <li>
+                <strong>Kasir POS:</strong> Dikhususkan untuk staf meja kasir kasir harian agar fokus melayani transaksi, scan barcode barang, dan cetak struk belanjaan pelanggan.
+              </li>
+              <li>
+                <strong>Pemilik Toko (Owner):</strong> Memiliki wewenang tertinggi untuk mengatur identitas toko, lisensi software, serta menambah/menonaktifkan akun pegawai di menu ini.
+              </li>
+            </ul>
+          </div>
         </motion.div>
       )}
 
@@ -2866,6 +3408,263 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
               className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md disabled:opacity-50"
             >
               {isResetting ? 'Mengosongkan...' : 'Konfirmasi Reset'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL 3: TAMBAH / EDIT AKUN PEGAWAI */}
+      <Modal
+        isOpen={isStaffModalOpen}
+        onClose={() => setIsStaffModalOpen(false)}
+        title={editingStaff ? 'Edit Akun Pegawai' : 'Buat Akun Pegawai Baru'}
+        subtitle={
+          editingStaff
+            ? 'Perbarui hak akses, username, atau kata sandi pegawai'
+            : 'Buat username dan password untuk Kasir POS atau Admin Toko'
+        }
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleSaveStaff} className="space-y-4 pt-1">
+          {/* Nama Lengkap */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Nama Lengkap Pegawai <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={staffFormData.nama}
+              onChange={(e) => setStaffFormData({ ...staffFormData, nama: e.target.value })}
+              placeholder="Contoh: Siti Rahmawati / Budi Santoso"
+              required
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          {/* Username & Password Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Username Login <span className="text-rose-500">*</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-2.5 text-xs text-slate-400 font-mono">@</span>
+                <input
+                  type="text"
+                  value={staffFormData.username}
+                  onChange={(e) =>
+                    setStaffFormData({
+                      ...staffFormData,
+                      username: e.target.value.toLowerCase().replace(/\s+/g, '_'),
+                    })
+                  }
+                  placeholder="kasir_siti"
+                  required
+                  className="w-full pl-8 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-mono font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Digunakan staf untuk login ke aplikasi.</p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Kata Sandi (Password) {!editingStaff && <span className="text-rose-500">*</span>}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const randomPass = Math.random().toString(36).slice(-6);
+                    setStaffFormData({ ...staffFormData, password: randomPass });
+                    setShowFormPassword(true);
+                  }}
+                  className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer"
+                >
+                  Acak Password
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  type={showFormPassword ? 'text' : 'password'}
+                  value={staffFormData.password}
+                  onChange={(e) => setStaffFormData({ ...staffFormData, password: e.target.value })}
+                  placeholder={editingStaff ? '(Biarkan kosong jika tidak diubah)' : 'Minimal 4 karakter'}
+                  required={!editingStaff}
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowFormPassword(!showFormPassword)}
+                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  {showFormPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Role Selection Interactive Cards */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+              Pilih Hak Akses (Role) <span className="text-rose-500">*</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Option: Kasir POS */}
+              <div
+                onClick={() => setStaffFormData({ ...staffFormData, role: 'kasir' })}
+                className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  staffFormData.role === 'kasir'
+                    ? 'border-emerald-500 bg-emerald-500/10 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 opacity-70 hover:opacity-100'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                    <ShoppingCart className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">Kasir POS</div>
+                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                      Pelayanan Meja Kasir
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Fokus untuk melayani transaksi, scan barcode barang, diskon, dan cetak struk belanjaan.
+                </p>
+              </div>
+
+              {/* Option: Admin Toko */}
+              <div
+                onClick={() => setStaffFormData({ ...staffFormData, role: 'admin' })}
+                className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  staffFormData.role === 'admin'
+                    ? 'border-blue-500 bg-blue-500/10 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 opacity-70 hover:opacity-100'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">Admin Toko</div>
+                    <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                      Pengelola Operasional
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Dapat mengelola produk, stok barang, supplier, rekap laporan, dan transaksi kasir.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* No. HP & Status Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                No. HP / WhatsApp Pegawai (Opsional)
+              </label>
+              <input
+                type="text"
+                value={staffFormData.noHp}
+                onChange={(e) => setStaffFormData({ ...staffFormData, noHp: e.target.value })}
+                placeholder="081234567890"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Status Akun Pegawai
+              </label>
+              <select
+                value={staffFormData.status}
+                onChange={(e) =>
+                  setStaffFormData({ ...staffFormData, status: e.target.value as 'aktif' | 'nonaktif' })
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer font-bold"
+              >
+                <option value="aktif">● Aktif (Dapat Login)</option>
+                <option value="nonaktif">○ Nonaktif (Akses Dikunci)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Catatan Tambahan */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Catatan / Shift Kerja (Opsional)
+            </label>
+            <input
+              type="text"
+              value={staffFormData.catatan}
+              onChange={(e) => setStaffFormData({ ...staffFormData, catatan: e.target.value })}
+              placeholder="Contoh: Shift Pagi (07:00 - 15:00) / Kasir Cabang 1"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsStaffModalOpen(false)}
+              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              Batal
+            </button>
+
+            <button
+              type="submit"
+              disabled={isSavingStaff}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-emerald-800 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+            >
+              <Save className="w-4 h-4 text-amber-300" />
+              <span>{isSavingStaff ? 'Menyimpan...' : editingStaff ? 'Simpan Perubahan' : 'Buat Akun Pegawai'}</span>
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 4: KONFIRMASI HAPUS AKUN PEGAWAI */}
+      <Modal
+        isOpen={staffDeleteConfirm !== null}
+        onClose={() => setStaffDeleteConfirm(null)}
+        title="Hapus Akun Pegawai"
+        subtitle="Konfirmasi penghapusan akses staf"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 pt-1">
+          <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-700 dark:text-rose-300 space-y-2">
+            <div className="font-bold flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>Apakah Anda yakin ingin menghapus akun ini?</span>
+            </div>
+            <p className="leading-relaxed">
+              Akun pegawai atas nama <strong>{staffDeleteConfirm?.nama}</strong> (@{staffDeleteConfirm?.username}) dengan peran{' '}
+              <strong>{staffDeleteConfirm?.role?.toUpperCase()}</strong> tidak akan dapat login lagi ke aplikasi.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setStaffDeleteConfirm(null)}
+              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 cursor-pointer"
+            >
+              Batal
+            </button>
+
+            <button
+              type="button"
+              onClick={() => staffDeleteConfirm && handleDeleteStaff(staffDeleteConfirm)}
+              className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md cursor-pointer flex items-center gap-1.5"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Hapus Akun Sekarang</span>
             </button>
           </div>
         </div>

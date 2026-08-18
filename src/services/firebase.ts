@@ -106,6 +106,7 @@ export const COLLECTIONS = {
   STOCK_OPNAMES: 'stock_opnames',
   SETTINGS: 'store_settings',
   USERS: 'users',
+  STAFF_ACCOUNTS: 'staff_accounts',
   ACTIVATED_LICENSES: 'activated_licenses',
   DAILY_REPORTS: 'daily_email_reports',
 };

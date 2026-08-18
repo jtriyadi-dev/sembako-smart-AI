@@ -37,6 +37,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleStaffQuickLogin = async (username: string, roleName: string) => {
+    setEmail(username);
+    setPassword('password123');
+    setSubmitting(true);
+    setAuthError(null);
+    try {
+      await login(username, 'password123');
+      success(`Login ${roleName} Berhasil`, `Selamat bertugas sebagai ${roleName} Toko.`);
+      handlePostAuthNavigate();
+    } catch (err: any) {
+      setAuthError(err.message || `Gagal login sebagai ${roleName}.`);
+      error('Gagal Login', err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleDeveloperQuickLogin = async () => {
     setEmail('developer@sembakosmart.id');
     setPassword('password123');
@@ -185,16 +202,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Alamat Email
+                Email atau Username Pegawai (Admin / Kasir / Owner)
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="pemilik@sembako.id"
+                  placeholder="Contoh: owner@toko.com, admin1, atau kasir1"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                 />
               </div>
             </div>
@@ -275,8 +294,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               </p>
             </div>
 
-            {/* Developer Super Admin Instant Access */}
+            {/* Quick Staff Login (Kasir & Admin) */}
             <div className="pt-2">
+              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>⚡ Masuk Cepat Pegawai Toko:</span>
+                <span className="text-[10px] text-emerald-500 font-mono">Siap Digunakan</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleStaffQuickLogin('kasir1', 'Kasir POS')}
+                  className="py-2 px-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  <span>Kasir (kasir1)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStaffQuickLogin('admin1', 'Admin Toko')}
+                  className="py-2 px-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                >
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  <span>Admin (admin1)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Developer Super Admin Instant Access */}
+            <div className="pt-1">
               <button
                 type="button"
                 onClick={handleDeveloperQuickLogin}

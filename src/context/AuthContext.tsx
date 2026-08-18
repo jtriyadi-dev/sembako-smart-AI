@@ -3,6 +3,7 @@ import { User } from 'firebase/auth';
 import { auth, subscribeAuthState, loginWithEmail, registerWithEmail, loginWithGoogle, logoutUser } from '../services/firebase';
 import { UserProfile } from '../types';
 import { resetDatabaseToInitialState } from '../services/productService';
+import { findStaffByCredentials, updateStaffLastLogin } from '../services/staffService';
 
 export interface DemoSession {
   isDemo: boolean;
@@ -250,13 +251,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // 2. Try Firebase Auth
+    // 2. Staff Account (Admin Toko & Kasir) Check (Username / Email + Password)
+    try {
+      const staffUser = await findStaffByCredentials(cleanEmail, cleanPass);
+      if (staffUser) {
+        if (staffUser.status === 'nonaktif') {
+          throw new Error('Akun pegawai ini sedang dinonaktifkan oleh Pemilik Toko. Hubungi Owner untuk mengaktifkan kembali.');
+        }
+
+        const mockStaffAuthUser = {
+          uid: staffUser.id,
+          email: staffUser.email || `${staffUser.username}@sembakosmart.id`,
+          displayName: staffUser.nama,
+          photoURL: null,
+        } as User;
+
+        const currentStoreName = localStorage.getItem('sembako_license_store') || 'Toko Sembako Berkah Smart';
+
+        setUser(mockStaffAuthUser);
+        setProfile({
+          uid: staffUser.id,
+          email: staffUser.email || `${staffUser.username}@sembakosmart.id`,
+          displayName: staffUser.nama,
+          photoURL: null,
+          namaToko: currentStoreName,
+          role: staffUser.role, // 'admin' | 'kasir'
+          alamatToko: '',
+          noHp: staffUser.noHp || '',
+        });
+
+        // Ensure active license session so staff can access cashier/admin features seamlessly
+        if (!localStorage.getItem('sembako_license_key')) {
+          localStorage.setItem('sembako_license_key', 'SBK-STAFF-ACTIVE-001');
+          localStorage.setItem('sembako_license_owner', staffUser.nama);
+          localStorage.setItem('sembako_license_store', currentStoreName);
+        }
+
+        // Update last login
+        updateStaffLastLogin(staffUser.id).catch(console.error);
+
+        setIsDemoSession(false);
+        return { user: mockStaffAuthUser } as any;
+      }
+    } catch (staffErr: any) {
+      if (staffErr.message && staffErr.message.includes('dinonaktifkan')) {
+        throw staffErr;
+      }
+    }
+
+    // 3. Try Firebase Auth
     try {
       return await loginWithEmail(email, pass);
     } catch (fbErr: any) {
       console.warn('Firebase login failed, checking CRM database...', fbErr?.message);
 
-      // 3. Try Server CRM Database (/api/auth/crm-login) with safe response checking
+      // 4. Try Server CRM Database (/api/auth/crm-login) with safe response checking
       try {
         const res = await fetch('/api/auth/crm-login', {
           method: 'POST',
