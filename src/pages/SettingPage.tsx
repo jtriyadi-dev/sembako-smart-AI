@@ -80,6 +80,7 @@ import {
   ShoppingCart,
   Boxes,
   Search,
+  Sliders,
 } from 'lucide-react';
 
 export type { StoreConfig };
@@ -811,6 +812,61 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl border border-emerald-500/20 shadow-xl space-y-6"
         >
+          {/* User Role & Access Card */}
+          <div className={`p-4 rounded-2xl border ${
+            profile?.role === 'developer'
+              ? 'bg-purple-950/40 border-purple-500/30'
+              : 'bg-emerald-950/30 border-emerald-500/20'
+          } flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner`}>
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl ${
+                profile?.role === 'developer'
+                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
+                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+              } flex items-center justify-center font-bold text-sm shrink-0`}>
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    {profile?.displayName || 'Pengguna'}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    profile?.role === 'developer'
+                      ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/40'
+                      : profile?.role === 'admin'
+                      ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/40'
+                      : profile?.role === 'kasir'
+                      ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/40'
+                      : 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40'
+                  }`}>
+                    Role: {profile?.role ? profile.role.toUpperCase() : 'OWNER'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {profile?.role === 'developer'
+                    ? 'Akses Master Developer & Super Admin. Berhak mengelola lisensi, CRM klien, dan konfigurasi sistem.'
+                    : profile?.role === 'admin'
+                    ? 'Akses Administrator Toko. Mengelola inventaris produk, supplier, dan laporan.'
+                    : profile?.role === 'kasir'
+                    ? 'Akses Kasir POS. Melayani transaksi kasir & cetak struk penjualan.'
+                    : 'Akses Pemilik Toko (Owner). Hak penuh pengelolaan toko, stok, dan kasir.'}
+                </p>
+              </div>
+            </div>
+
+            {profile?.role === 'developer' && onNavigate && (
+              <button
+                type="button"
+                onClick={() => onNavigate('control-panel')}
+                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer shadow-md"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span>Buka Control Panel DEV</span>
+              </button>
+            )}
+          </div>
+
           <div className="border-b border-slate-200 dark:border-slate-800 pb-4 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">

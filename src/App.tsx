@@ -60,7 +60,15 @@ const MainAppContent: React.FC = () => {
   }
 
   // Developer Control Panel (Super Admin)
+  const isDevSession =
+    profile?.role === 'developer' ||
+    Boolean(localStorage.getItem('sembako_developer_auth_session'));
+
   if (currentPage === 'control-panel') {
+    if (!isDevSession && !isDevAuth) {
+      setCurrentPage('dashboard');
+      return null;
+    }
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 sm:p-6 lg:p-8">
         <ToastContainer />
@@ -90,10 +98,6 @@ const MainAppContent: React.FC = () => {
   }
 
   // 3. Menu Aktivasi Lisensi (For new users with unactivated license)
-  const isDevSession =
-    profile?.role === 'developer' ||
-    Boolean(localStorage.getItem('sembako_developer_auth_session'));
-
   const isActivated = licenseInfo.isActivated || isDemoSession || isDevAuth || isDevSession;
   if (currentPage === 'activation' || !isActivated) {
     return (

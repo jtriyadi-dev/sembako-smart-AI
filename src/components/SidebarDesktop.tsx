@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PageId } from '../types';
 import { useStore } from '../context/StoreContext';
+import { useAuth } from '../context/AuthContext';
 import { getAccentTheme } from '../utils/themeUtils';
 import {
   LayoutDashboard,
@@ -26,8 +27,13 @@ interface SidebarDesktopProps {
 
 export const SidebarDesktop: React.FC<SidebarDesktopProps> = ({ currentPage, onNavigate }) => {
   const { storeConfig } = useStore();
+  const { profile } = useAuth();
   const accent = getAccentTheme(storeConfig.accentColor);
   const [collapsed, setCollapsed] = useState(false);
+
+  const isDeveloper =
+    profile?.role === 'developer' ||
+    (typeof window !== 'undefined' && localStorage.getItem('sembako_developer_auth_session') === 'true');
 
   // Auto-collapse sidebar on tablet screen sizes (< 1024px) for optimal content width
   useEffect(() => {
@@ -54,7 +60,9 @@ export const SidebarDesktop: React.FC<SidebarDesktopProps> = ({ currentPage, onN
     { id: 'laporan' as PageId, label: 'Laporan', icon: BarChart3 },
     { id: 'ai-assistant' as PageId, label: 'AI Assistant', icon: Sparkles, isAi: true },
     { id: 'setting' as PageId, label: 'Setting', icon: Settings },
-    { id: 'control-panel' as PageId, label: 'Control Panel', icon: Sliders, badge: 'Dev' },
+    ...(isDeveloper
+      ? [{ id: 'control-panel' as PageId, label: 'Control Panel', icon: Sliders, badge: 'Dev' }]
+      : []),
   ];
 
   return (

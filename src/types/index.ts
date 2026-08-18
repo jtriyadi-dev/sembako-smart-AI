@@ -15,12 +15,14 @@ export type PageId =
 
 export type ThemeMode = 'light' | 'dark';
 
+export type UserRole = 'developer' | 'owner' | 'admin' | 'kasir';
+
 export interface UserProfile {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  role?: 'owner' | 'kasir' | 'admin' | 'developer';
+  role?: UserRole;
   namaToko?: string;
   alamatToko?: string;
   noHp?: string;

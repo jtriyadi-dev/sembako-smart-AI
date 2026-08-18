@@ -413,6 +413,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handleLogout = async () => {
+    localStorage.removeItem('sembako_developer_auth_session');
+    localStorage.removeItem('sembako_developer_secret');
     if (isDemoSession) {
       localStorage.removeItem('sembako_demo_session');
       setIsDemoSession(false);

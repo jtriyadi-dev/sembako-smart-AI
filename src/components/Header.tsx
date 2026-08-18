@@ -21,6 +21,26 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, onOpenDoc, onOpenOnb
   const { info, success, warning } = useToast();
   const { storeConfig, licenseInfo } = useStore();
 
+  const isDeveloper =
+    profile?.role === 'developer' ||
+    (typeof window !== 'undefined' && localStorage.getItem('sembako_developer_auth_session') === 'true');
+
+  const getRoleBadge = () => {
+    const role = profile?.role || 'owner';
+    switch (role) {
+      case 'developer':
+        return { label: 'Developer', color: 'text-purple-600 dark:text-purple-400 font-bold' };
+      case 'admin':
+        return { label: 'Admin Toko', color: 'text-blue-600 dark:text-blue-400 font-semibold' };
+      case 'kasir':
+        return { label: 'Kasir POS', color: 'text-emerald-600 dark:text-emerald-400 font-semibold' };
+      case 'owner':
+      default:
+        return { label: 'Owner', color: 'text-amber-600 dark:text-amber-400 font-semibold' };
+    }
+  };
+
+  const roleInfo = getRoleBadge();
   const [isEditStoreOpen, setIsEditStoreOpen] = useState(false);
   const [isLicenseOpen, setIsLicenseOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -182,14 +202,19 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, onOpenDoc, onOpenOnb
           {/* Right Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
 
-          {/* Control Panel (Developer) Button */}
-          <button
-            onClick={() => onNavigate('control-panel')}
-            className="p-2 sm:p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500/40 transition-all shadow-sm cursor-pointer"
-            title="Buka Control Panel Developer & CRM"
-          >
-            <Sliders className="w-4 h-4" />
-          </button>
+          {/* Control Panel (Developer) Button - ONLY for Developer */}
+          {isDeveloper && (
+            <button
+              onClick={() => onNavigate('control-panel')}
+              className="p-2 sm:p-2.5 rounded-xl border border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-300 hover:bg-purple-500/20 transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
+              title="Buka Control Panel Developer & CRM"
+            >
+              <Sliders className="w-4 h-4 text-purple-500" />
+              <span className="hidden xl:inline text-[10px] font-black uppercase tracking-wider bg-purple-500/20 px-1.5 py-0.5 rounded-md">
+                Dev Panel
+              </span>
+            </button>
+          )}
 
           {/* Notification Bell */}
           <button
@@ -218,15 +243,19 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, onOpenDoc, onOpenOnb
                 className="flex items-center gap-2 p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
                 title="Setting Profil"
               >
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-600 to-emerald-800 text-amber-300 font-bold flex items-center justify-center text-xs shadow-inner shrink-0">
+                <div className={`w-8 h-8 rounded-lg ${
+                  profile?.role === 'developer'
+                    ? 'bg-gradient-to-br from-purple-600 to-indigo-800 text-purple-200'
+                    : 'bg-gradient-to-br from-emerald-600 to-emerald-800 text-amber-300'
+                } font-bold flex items-center justify-center text-xs shadow-inner shrink-0`}>
                   {profile?.displayName?.charAt(0) || 'P'}
                 </div>
                 <div className="hidden lg:flex flex-col text-left">
                   <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight truncate max-w-[100px]">
                     {profile?.displayName}
                   </span>
-                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                    Owner
+                  <span className={`text-[10px] ${roleInfo.color}`}>
+                    {roleInfo.label}
                   </span>
                 </div>
               </button>
