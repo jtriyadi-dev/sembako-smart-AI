@@ -8,9 +8,11 @@ import {
   deleteCrmUser,
   testGeminiApiKey,
   testWhatsAppGateway,
+  testSupabaseGateway,
   MASTER_DEV_PIN,
   MASTER_DEV_EMAIL
 } from '../services/devCrmService';
+import { SUPABASE_SCHEMA_SQL } from '../services/supabaseClient';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -54,7 +56,10 @@ import {
   Play,
   RotateCcw,
   CheckCircle2,
-  X
+  X,
+  Database,
+  FileCode,
+  Code
 } from 'lucide-react';
 import { formatRupiah } from '../utils/formatters';
 
@@ -107,12 +112,20 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const [waProviderInput, setWaProviderInput] = useState(apiKeys.waGatewayProvider || 'fonnte');
   const [waApiKeyInput, setWaApiKeyInput] = useState(apiKeys.waApiKey || '');
   const [waSenderInput, setWaSenderInput] = useState(apiKeys.waSenderNumber || '');
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(apiKeys.supabaseUrl || '');
+  const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState(apiKeys.supabaseAnonKey || '');
+  const [supabaseServiceRoleKeyInput, setSupabaseServiceRoleKeyInput] = useState(apiKeys.supabaseServiceRoleKey || '');
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showWaKey, setShowWaKey] = useState(false);
+  const [showSupabaseKey, setShowSupabaseKey] = useState(false);
+  const [showSupabaseServiceKey, setShowSupabaseServiceKey] = useState(false);
   const [testingGemini, setTestingGemini] = useState(false);
   const [geminiTestResult, setGeminiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [testingWa, setTestingWa] = useState(false);
   const [waTestResult, setWaTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testingSupabase, setTestingSupabase] = useState(false);
+  const [supabaseTestResult, setSupabaseTestResult] = useState<{ success: boolean; message: string; projectUrl?: string } | null>(null);
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
 
   // Live CMS Form State (Synced from Remote Config)
   const [cmsDraft, setCmsDraft] = useState<RemoteAppConfig>(config);
@@ -198,6 +211,9 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       setWaApiKeyInput(apiKeys.waApiKey || '');
       setWaSenderInput(apiKeys.waSenderNumber || '');
       setWaProviderInput(apiKeys.waGatewayProvider || 'fonnte');
+      setSupabaseUrlInput(apiKeys.supabaseUrl || '');
+      setSupabaseAnonKeyInput(apiKeys.supabaseAnonKey || '');
+      setSupabaseServiceRoleKeyInput(apiKeys.supabaseServiceRoleKey || '');
     }
   }, [isDevAuth, config, apiKeys]);
 
@@ -306,6 +322,28 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
     }
   };
 
+  // Handle Test Supabase Connection
+  const handleTestSupabase = async () => {
+    setTestingSupabase(true);
+    setSupabaseTestResult(null);
+    try {
+      const res = await testSupabaseGateway({
+        supabaseUrl: supabaseUrlInput,
+        supabaseAnonKey: supabaseAnonKeyInput,
+      });
+      setSupabaseTestResult(res);
+      if (res.success) {
+        success('Supabase Terhubung', res.message);
+      } else {
+        warning('Uji Koneksi Supabase Gagal', res.message);
+      }
+    } catch (e: any) {
+      setSupabaseTestResult({ success: false, message: e.message || 'Gagal menguji koneksi Supabase' });
+    } finally {
+      setTestingSupabase(false);
+    }
+  };
+
   // Handle Save API Keys
   const handleSaveApiKeys = async () => {
     try {
@@ -315,11 +353,14 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
         waGatewayProvider: waProviderInput as any,
         waApiKey: waApiKeyInput,
         waSenderNumber: waSenderInput,
+        supabaseUrl: supabaseUrlInput,
+        supabaseAnonKey: supabaseAnonKeyInput,
+        supabaseServiceRoleKey: supabaseServiceRoleKeyInput,
       });
       if (ok) {
-        success('API Keys Disimpan', 'Konfigurasi AI dan WhatsApp Gateway berhasil diperbarui ke server!');
+        success('Konfigurasi API & Database Disimpan', 'Kredensial Supabase, AI, dan WhatsApp Gateway berhasil diperbarui!');
       } else {
-        error('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan API Key.');
+        error('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan konfigurasi.');
       }
     } catch (e: any) {
       error('Gagal Menyimpan', e.message);
@@ -1931,6 +1972,132 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
             )}
           </div>
 
+          {/* Supabase Cloud Database & Backend Integration */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shadow-inner">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Supabase Cloud Database & Backend (PostgreSQL)
+                    </h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20">
+                      Cloud DB & Auth
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Penyimpanan cloud terpusat untuk Data Produk, Transaksi POS Kasir, Akun Pelanggan CRM, dan Webhook Bot.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500/15 text-slate-700 dark:text-slate-300 font-semibold text-xs border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <FileCode className="w-4 h-4 text-emerald-500" />
+                Skrip SQL Schema Supabase
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Supabase Project URL (API URL)
+                </label>
+                <input
+                  type="text"
+                  value={supabaseUrlInput}
+                  onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                  placeholder="https://abcdefghijklmn.supabase.co"
+                  className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Dapat ditemukan di dashboard Supabase: <strong>Project Settings &gt; API &gt; Project URL</strong>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Supabase Anon / Public API Key (Client & Web)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showSupabaseKey ? 'text' : 'password'}
+                    value={supabaseAnonKeyInput}
+                    onChange={(e) => setSupabaseAnonKeyInput(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full pr-10 pl-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSupabaseKey(!showSupabaseKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showSupabaseKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Service Role Key (Opsional / Admin Backend)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showSupabaseServiceKey ? 'text' : 'password'}
+                    value={supabaseServiceRoleKeyInput}
+                    onChange={(e) => setSupabaseServiceRoleKeyInput(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full pr-10 pl-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSupabaseServiceKey(!showSupabaseServiceKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showSupabaseServiceKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestSupabase}
+                  disabled={testingSupabase}
+                  className="px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-500/30 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {testingSupabase ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 text-emerald-500" />}
+                  Uji Koneksi Supabase Cloud
+                </button>
+              </div>
+
+              <span className="text-[11px] text-slate-400">
+                💡 <em>Data otomatis tersinkronisasi dua arah saat online.</em>
+              </span>
+            </div>
+
+            {supabaseTestResult && (
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  supabaseTestResult.success
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                    : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+                }`}
+              >
+                {supabaseTestResult.success ? <CheckCircle className="w-4 h-4 shrink-0 text-emerald-500" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />}
+                <span>{supabaseTestResult.message}</span>
+              </div>
+            )}
+          </div>
+
           {/* Save Button for API Keys */}
           <div className="flex justify-end">
             <button
@@ -1938,7 +2105,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
               className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-900/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
             >
               <Save className="w-4 h-4" />
-              Simpan & Terapkan Semua API Key
+              Simpan & Terapkan Semua Konfigurasi
             </button>
           </div>
         </div>
@@ -2545,6 +2712,98 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                   Tambahkan ke CMS
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: SUPABASE SQL SCHEMA MIGRATION SCRIPT */}
+      {/* ========================================================================= */}
+      {isSqlModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Skrip SQL Schema Supabase (PostgreSQL)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Tabel: products, transactions, crm_users, webhook_logs, remote_config
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-400 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300 space-y-1.5 leading-relaxed">
+                <p className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  Petunjuk Pemasangan di Supabase:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 pl-1 text-[11px] text-slate-700 dark:text-slate-300">
+                  <li>Buka dashboard project Anda di <strong>https://supabase.com/dashboard</strong></li>
+                  <li>Pilih menu <strong>SQL Editor</strong> pada bilah navigasi kiri.</li>
+                  <li>Klik <strong>New Query</strong>, lalu tempel (<em>paste</em>) kode SQL di bawah ini.</li>
+                  <li>Klik tombol hijau <strong>Run</strong> untuk membuat seluruh tabel &amp; index secara instan.</li>
+                </ol>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Code className="w-3.5 h-3.5 text-emerald-500" />
+                    SQL Schema Script
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+                      success('Skrip SQL Disalin', 'Seluruh perintah SQL Schema berhasil disalin ke clipboard!');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin SQL Schema
+                  </button>
+                </div>
+                <pre className="p-4 rounded-2xl bg-slate-950 text-emerald-400 font-mono text-xs overflow-x-auto max-h-72 select-all border border-slate-800 leading-relaxed">
+                  {SUPABASE_SCHEMA_SQL}
+                </pre>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(false)}
+                className="px-5 py-2.5 text-xs font-bold rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+                  success('Skrip SQL Disalin', 'Seluruh perintah SQL Schema berhasil disalin ke clipboard!');
+                  setIsSqlModalOpen(false);
+                }}
+                className="px-5 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-md cursor-pointer flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                Salin &amp; Tutup
+              </button>
             </div>
           </div>
         </div>

@@ -521,6 +521,59 @@ async function startServer() {
     }
   });
 
+  // 10. POST /api/developer/test-supabase - Live test Supabase database & backend connection
+  app.post("/api/developer/test-supabase", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const { supabaseUrl, supabaseKey } = req.body || {};
+      const url = (supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+      const key = (supabaseKey || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+
+      if (!url || !key) {
+        return res.status(400).json({
+          success: false,
+          message: "URL Supabase dan Key API belum diisi. Harap masukkan kredensial Supabase Anda."
+        });
+      }
+
+      if (!url.startsWith("https://")) {
+        return res.status(400).json({
+          success: false,
+          message: "Format URL Supabase tidak valid. URL harus diawali dengan https://"
+        });
+      }
+
+      // Test ping to Supabase REST endpoint
+      const pingUrl = `${url.replace(/\/$/, '')}/rest/v1/`;
+      const pingResp = await fetch(pingUrl, {
+        method: "GET",
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`
+        }
+      });
+
+      if (!pingResp.ok && pingResp.status === 401) {
+        return res.json({
+          success: false,
+          message: "Koneksi Supabase Ditolak (401 Unauthorized): Anon/Public Key tidak valid. Periksa kembali API Key dari Project Settings > API di Supabase."
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `✅ Berhasil Terhubung ke Supabase Cloud Database! Backend & PostgreSQL REST API Siap Digunakan.`,
+        url
+      });
+    } catch (err: any) {
+      console.warn("[Test Supabase Error]:", err?.message);
+      return res.json({
+        success: false,
+        message: `❌ Gagal menghubungi Supabase: ${err?.message || "Koneksi terputus atau URL tidak dapat diakses."}`
+      });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

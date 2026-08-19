@@ -455,6 +455,43 @@ export async function testWhatsAppGateway(config: { provider: string; token: str
   };
 }
 
+export async function testSupabaseGateway(config: { supabaseUrl: string; supabaseAnonKey: string }): Promise<{ success: boolean; message: string }> {
+  const url = (config.supabaseUrl || '').trim();
+  const key = (config.supabaseAnonKey || '').trim();
+
+  if (!url || !key) {
+    return {
+      success: false,
+      message: 'URL Supabase dan Anon/Public Key wajib diisi.'
+    };
+  }
+
+  // 1. Try server-side endpoint first
+  try {
+    const { ok, data } = await safeJsonFetch('/api/developer/test-supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supabaseUrl: url, supabaseKey: key }),
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (ok && data && typeof data.success === 'boolean') {
+      return data;
+    }
+  } catch (err) {}
+
+  // 2. Client-side fallback test via supabaseClient
+  try {
+    const { testSupabaseConnection } = await import('./supabaseClient');
+    return await testSupabaseConnection(url, key);
+  } catch (e: any) {
+    return {
+      success: false,
+      message: `❌ Gagal menguji Supabase: ${e?.message || 'Error init client'}`
+    };
+  }
+}
+
 // ==========================================
 // 4. DEVELOPER AUTHENTICATION
 // ==========================================

@@ -253,5 +253,8 @@ export const DEFAULT_API_KEYS: DeveloperApiKeys = {
   waWebhookUrl: '/api/whatsapp/webhook',
   paymentGatewayKey: '',
   cloudSyncUrl: 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42',
+  supabaseUrl: '',
+  supabaseAnonKey: '',
+  supabaseServiceRoleKey: '',
   updatedAt: new Date().toISOString(),
 };

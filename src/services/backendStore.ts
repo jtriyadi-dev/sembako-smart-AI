@@ -111,9 +111,18 @@ export function saveApiKeysBackend(keys: Partial<DeveloperApiKeys>): DeveloperAp
     ...keys,
     updatedAt: new Date().toISOString(),
   };
-  // Update process.env if geminiApiKey provided
+  // Update process.env if geminiApiKey or Supabase keys provided
   if (keys.geminiApiKey) {
     process.env.GEMINI_API_KEY = keys.geminiApiKey;
+  }
+  if (keys.supabaseUrl) {
+    process.env.SUPABASE_URL = keys.supabaseUrl;
+  }
+  if (keys.supabaseAnonKey) {
+    process.env.SUPABASE_ANON_KEY = keys.supabaseAnonKey;
+  }
+  if (keys.supabaseServiceRoleKey) {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = keys.supabaseServiceRoleKey;
   }
   saveDeveloperStoresToFile();
   return { ...inMemoryApiKeys };

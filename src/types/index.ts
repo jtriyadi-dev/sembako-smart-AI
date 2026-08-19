@@ -340,5 +340,8 @@ export interface DeveloperApiKeys {
   waWebhookUrl: string;
   paymentGatewayKey: string;
   cloudSyncUrl: string;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
+  supabaseServiceRoleKey?: string;
   updatedAt: string;
 }
