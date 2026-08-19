@@ -128,9 +128,29 @@ async function startServer() {
         body = body.data[0];
       }
       
-      // Extract sender and message text from various WA Gateway formats
-      const sender = body.sender || body.from || body.phone || body.wa_number || body.number || body.pushName || "WhatsApp User";
-      const messageText = (body.message || body.text || body.body || body.caption || body.payload || body.pesan || "").toString().trim();
+      // Extract sender and message text from various WA Gateway formats (Fonnte, Wablas, Whacenter, Meta Cloud API, etc.)
+      const sender = body.sender || 
+                     body.from || 
+                     body.phone || 
+                     body.wa_number || 
+                     body.number || 
+                     body.pushName || 
+                     (body.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.wa_id) || 
+                     "WhatsApp User";
+
+      const messageText = (
+        body.message || 
+        body.text || 
+        body.body || 
+        body.caption || 
+        body.payload || 
+        body.pesan || 
+        body.msg || 
+        (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body) || 
+        (body.data?.message) || 
+        (typeof body === 'string' ? body : "") || 
+        ""
+      ).toString().trim();
 
       console.log(`[WhatsApp Webhook Received] From: ${sender} | Message: "${messageText}"`);
 
@@ -148,10 +168,16 @@ async function startServer() {
         return res.json({ status: "success", detail: "Pesan tidak berisi teks" });
       }
 
-      // Check if message is a direct stock add command (e.g. STOK#Minyak Bimoli 2L#30 or TAMBAHSTOK#Minyak Bimoli 2L#20)
-      const isStockOnlyCmd = (messageText.toUpperCase().startsWith("STOK#") || messageText.toUpperCase().startsWith("TAMBAHSTOK#")) && messageText.includes("#");
+      const upperMsg = messageText.toUpperCase();
+
+      // 1. Direct Stock Update Command (e.g. STOK#Minyak 2L#20, TAMBAHSTOK#Beras#10, STOK: Beras, 10, STOK|Beras|10)
+      const isStockOnlyCmd = 
+        (upperMsg.startsWith("STOK#") || upperMsg.startsWith("TAMBAHSTOK#") || upperMsg.startsWith("STOK:") || upperMsg.startsWith("TAMBAH STOK")) &&
+        (messageText.includes("#") || messageText.includes(":") || messageText.includes("|") || messageText.includes(","));
+
       if (isStockOnlyCmd) {
-        const parts = messageText.split("#").map((p: string) => p.trim());
+        const delimiter = messageText.includes("#") ? "#" : messageText.includes("|") ? "|" : messageText.includes(":") ? ":" : ",";
+        const parts = messageText.split(delimiter).map((p: string) => p.trim()).filter(Boolean);
         const nama = parts[1] || "Produk";
         const addedStock = parseInt(parts[2]?.replace(/\D/g, "") || "0", 10);
 
@@ -177,15 +203,97 @@ async function startServer() {
         });
       }
 
-      // Check if message matches product creation format
-      const isProductFormat = messageText.toUpperCase().startsWith("PRODUK#") || messageText.includes("#");
+      // 2. Multiline Product Format check (e.g. Nama: ... \n Harga Beli: ... \n Stok: ...)
+      const isMultilineProduct = messageText.includes("\n") && 
+        (upperMsg.includes("NAMA") || upperMsg.includes("PRODUK") || upperMsg.includes("HARGA") || upperMsg.includes("STOK"));
+
+      if (isMultilineProduct) {
+        const lines = messageText.split("\n").map(l => l.trim()).filter(Boolean);
+        let nama = "";
+        let kategori = "Sembako Utama";
+        let hargaBeli = 10000;
+        let hargaJual = 12000;
+        let stok = 10;
+        let satuan = "Pcs";
+        let minStok = 5;
+
+        lines.forEach(line => {
+          const lUpper = line.toUpperCase();
+          if (lUpper.startsWith("NAMA") || lUpper.startsWith("PRODUK")) {
+            nama = line.split(/[:#=-]/).slice(1).join(":").trim() || nama;
+          } else if (lUpper.startsWith("KATEGORI")) {
+            kategori = line.split(/[:#=-]/).slice(1).join(":").trim() || kategori;
+          } else if (lUpper.includes("BELI") || lUpper.includes("MODAL") || lUpper.includes("KULAK")) {
+            const num = parseInt(line.replace(/\D/g, ""), 10);
+            if (!isNaN(num) && num > 0) hargaBeli = num;
+          } else if (lUpper.includes("JUAL") || lUpper.includes("HARGA")) {
+            const num = parseInt(line.replace(/\D/g, ""), 10);
+            if (!isNaN(num) && num > 0) hargaJual = num;
+          } else if (lUpper.startsWith("STOK") || lUpper.startsWith("JUMLAH") || lUpper.startsWith("QTY")) {
+            const num = parseInt(line.replace(/\D/g, ""), 10);
+            if (!isNaN(num)) stok = num;
+          } else if (lUpper.startsWith("SATUAN")) {
+            satuan = line.split(/[:#=-]/).slice(1).join(":").trim() || satuan;
+          } else if (lUpper.includes("MIN")) {
+            const num = parseInt(line.replace(/\D/g, ""), 10);
+            if (!isNaN(num)) minStok = num;
+          }
+        });
+
+        if (!nama && lines.length > 0) {
+          nama = lines[0].replace(/^(PRODUK|TAMBAH PRODUK|TAMBAH)\s*[:#=-]?\s*/i, "").trim();
+        }
+
+        if (nama) {
+          const result = await processProductWebhook({
+            nama,
+            kategori,
+            hargaBeli,
+            hargaJual: hargaJual || Math.round(hargaBeli * 1.15),
+            stok,
+            satuan,
+            minStok,
+            sender: String(sender)
+          });
+
+          const logItem: WebhookLog = {
+            id: Date.now().toString(),
+            time: new Date().toLocaleTimeString("id-ID"),
+            sender: String(sender),
+            rawBody: body,
+            messageText,
+            status: "success",
+            actionTaken: `Data "${nama}" berhasil diproses via format Multiline. Total Stok: ${result.updatedStock}`,
+          };
+          recentWebhooks.unshift(logItem);
+
+          return res.json({
+            data: [
+              {
+                message: result.message
+              }
+            ]
+          });
+        }
+      }
+
+      // 3. Delimited Product Creation Format (PRODUK#..., PRODUK|..., PRODUK:..., TAMBAH#...)
+      const isProductFormat = 
+        upperMsg.startsWith("PRODUK#") || 
+        upperMsg.startsWith("PRODUK|") || 
+        upperMsg.startsWith("PRODUK:") || 
+        upperMsg.startsWith("TAMBAH#") || 
+        upperMsg.startsWith("TAMBAH:") || 
+        (messageText.includes("#") && (upperMsg.includes("PRODUK") || upperMsg.includes("SEMBAKO") || messageText.split("#").length >= 3));
 
       if (isProductFormat) {
-        const parts = messageText.split("#").map((p: string) => p.trim());
-        const startIndex = parts[0].toUpperCase() === "PRODUK" ? 1 : 0;
+        const delimiter = messageText.includes("#") ? "#" : messageText.includes("|") ? "|" : messageText.includes(":") ? ":" : ",";
+        const parts = messageText.split(delimiter).map((p: string) => p.trim());
+        const firstPartUpper = (parts[0] || "").toUpperCase();
+        const startIndex = (firstPartUpper.includes("PRODUK") || firstPartUpper.includes("TAMBAH")) && parts.length > 2 ? 1 : 0;
         
-        const nama = parts[startIndex] || "Produk WA Bot";
-        const kategori = parts[startIndex + 1] || "Sembako & Bumbu";
+        const nama = parts[startIndex] || "Produk Sembako";
+        const kategori = parts[startIndex + 1] || "Sembako Utama";
         const hargaBeli = parseInt(parts[startIndex + 2]?.replace(/\D/g, "") || "10000", 10);
         const hargaJual = parseInt(parts[startIndex + 3]?.replace(/\D/g, "") || "12000", 10);
         const stok = parseInt(parts[startIndex + 4]?.replace(/\D/g, "") || "10", 10);
@@ -210,7 +318,7 @@ async function startServer() {
           rawBody: body,
           messageText,
           status: "success",
-          actionTaken: `Data "${nama}" berhasil disimpan ke Firestore. Total Stok: ${result.updatedStock}`,
+          actionTaken: `Data "${nama}" berhasil disimpan. Total Stok: ${result.updatedStock}`,
         };
         recentWebhooks.unshift(logItem);
 
@@ -225,8 +333,8 @@ async function startServer() {
         });
       }
 
-      // Check for !stok command
-      if (messageText.toLowerCase().startsWith("!stok") || messageText.toLowerCase().startsWith("!cekstok")) {
+      // 4. Check for !stok command
+      if (messageText.toLowerCase().startsWith("!stok") || messageText.toLowerCase().startsWith("!cekstok") || messageText.toLowerCase() === "stok" || messageText.toLowerCase() === "cek stok") {
         const logItem: WebhookLog = {
           id: Date.now().toString(),
           time: new Date().toLocaleTimeString("id-ID"),
@@ -234,11 +342,13 @@ async function startServer() {
           rawBody: body,
           messageText,
           status: "success",
-          actionTaken: "Perintah !stok diproses, membalas data ringkasan stok"
+          actionTaken: "Perintah cek stok diproses, membalas ringkasan stok toko"
         };
         recentWebhooks.unshift(logItem);
 
-        const replyMessage = "📦 [POS Toko Sembako] Layanan Bot Cek Stok Aktif. Silakan gunakan dashboard POS untuk melihat laporan lengkap.";
+        const prods = getProductsBackend();
+        const top5 = prods.slice(0, 8).map(p => `• ${p.nama}: ${p.stok} ${p.satuan} (Rp ${p.hargaJual.toLocaleString('id-ID')})`).join('\n');
+        const replyMessage = `📦 *[POS TOKO SEMBAKO - INFO STOK]*\nTotal Produk Aktif: ${prods.length} item\n\n*Contoh Stok Barang:*\n${top5}\n\n_Ketik PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok untuk menambah produk._`;
 
         return res.json({
           data: [
@@ -249,7 +359,7 @@ async function startServer() {
         });
       }
 
-      // Generic log
+      // Generic help reply
       const logItem: WebhookLog = {
         id: Date.now().toString(),
         time: new Date().toLocaleTimeString("id-ID"),
@@ -261,7 +371,7 @@ async function startServer() {
       };
       recentWebhooks.unshift(logItem);
 
-      const defaultReply = "ℹ️ [POS Toko Sembako] Format pesan tidak dikenali.\n\n• Tambah/Update Produk:\nPRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok\n\n• Tambah Stok Saja:\nSTOK#Nama#JumlahStokBaru";
+      const defaultReply = "ℹ️ *[POS Toko Sembako Bot]*\n\nFormat input WhatsApp:\n\n1️⃣ *Tambah / Update Produk:*\n`PRODUK#Nama Barang#Kategori#Harga Beli#Harga Jual#Jumlah Stok#Satuan#Min Stok`\n_Contoh: PRODUK#Beras Rojolele 10kg#Sembako#120000#135000#25#Karung#5_\n\n2️⃣ *Tambah Stok Cepat:*\n`STOK#Nama Barang#Jumlah Tambahan`\n_Contoh: STOK#Beras Rojolele 10kg#10_\n\n3️⃣ *Cek Stok:*\nKetik `!stok`";
 
       return res.json({
         data: [
@@ -276,7 +386,7 @@ async function startServer() {
       return res.status(200).json({
         data: [
           {
-            message: `❌ [POS Toko Sembako] Gagal menyimpan data ke Firestore: ${err?.message || "Error internal server"}`
+            message: `❌ [POS Toko Sembako] Gagal memproses data WhatsApp: ${err?.message || "Error internal server"}`
           }
         ]
       });

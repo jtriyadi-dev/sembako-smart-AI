@@ -215,7 +215,7 @@ export function getSupabaseConfigBackend(): { url: string; key: string } | null 
 // Fetch products directly from Supabase Cloud Database (PostgreSQL)
 export async function fetchProductsFromSupabaseBackend(): Promise<ProdukItem[]> {
   const sb = getSupabaseConfigBackend();
-  if (!sb) return [];
+  if (!sb) return [...inMemoryProducts];
   try {
     const res = await fetch(`${sb.url}/rest/v1/products?select=*&order=created_at.desc`, {
       method: 'GET',
@@ -225,7 +225,7 @@ export async function fetchProductsFromSupabaseBackend(): Promise<ProdukItem[]> 
       },
       signal: AbortSignal.timeout(4000)
     });
-    if (!res.ok) return [];
+    if (!res.ok) return [...inMemoryProducts];
     const rows = await res.json();
     if (Array.isArray(rows) && rows.length > 0) {
       const mapped = rows.map((r: any) => ({
@@ -248,15 +248,26 @@ export async function fetchProductsFromSupabaseBackend(): Promise<ProdukItem[]> 
         updatedAt: r.updated_at || new Date().toISOString()
       }));
 
-      // Update in-memory cache with Supabase products
-      inMemoryProducts = mapped;
+      // Smart Merge: Keep in-memory products (including products added via WA Webhook) and merge with Supabase
+      const mergedMap = new Map<string, ProdukItem>();
+      // First populate with in-memory products
+      inMemoryProducts.forEach((p) => mergedMap.set(p.id, p));
+      // Overlay Supabase products
+      mapped.forEach((sp) => {
+        const existing = mergedMap.get(sp.id);
+        if (!existing || new Date(sp.updatedAt).getTime() >= new Date(existing.updatedAt).getTime()) {
+          mergedMap.set(sp.id, sp);
+        }
+      });
+
+      inMemoryProducts = Array.from(mergedMap.values());
       saveLocalProductsToFile();
-      return mapped;
+      return inMemoryProducts;
     }
   } catch (err: any) {
     console.warn('[BackendStore Supabase Fetch Error]:', err?.message);
   }
-  return [];
+  return [...inMemoryProducts];
 }
 
 // Sync single product to Supabase

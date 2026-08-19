@@ -241,15 +241,17 @@ export function subscribeProducts(
     }
   });
 
-  // 3. High-speed 2.5s Polling (Ensures stock changes via WhatsApp Webhook show immediately)
+  // 3. High-speed 1.5s Polling (Ensures new products/stock from WhatsApp Webhook appear instantly)
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
-    const items = await fetchProductsDirectRest();
-    if (!isUnsubscribed && items.length > 0) {
-      hasRestData = true;
-      onData(items);
-    }
-  }, 2500);
+    try {
+      const items = await fetchProductsDirectRest();
+      if (!isUnsubscribed && items.length > 0) {
+        hasRestData = true;
+        onData(items);
+      }
+    } catch (e) {}
+  }, 1500);
 
   // 4. Firestore JS SDK Realtime Listener (non-blocking fallback)
   let unsubscribeSnap = () => {};
@@ -274,31 +276,40 @@ export function subscribeProducts(
           return;
         }
 
-        const products: ProdukItem[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            kode: data.kode || `SKU-${docSnap.id.substring(0, 5).toUpperCase()}`,
-            barcode: data.barcode || '',
-            nama: data.nama || 'Produk Sembako',
-            kategori: data.kategori || 'Lainnya',
-            hargaBeli: Number(data.hargaBeli) || 0,
-            hargaJual: Number(data.hargaJual) || 0,
-            stok: Number(data.stok) || 0,
-            minStok: Number(data.minStok) || 5,
-            satuan: data.satuan || 'Pcs',
-            gambarUrl: data.gambarUrl || '',
-            deskripsi: data.deskripsi || '',
-            expiredDate: data.expiredDate || '',
-            batchNo: data.batchNo || '',
-            terjual: Number(data.terjual) || 0,
-            createdAt: data.createdAt || new Date().toISOString(),
-            updatedAt: data.updatedAt || new Date().toISOString(),
-          };
-        });
+        // Only use Firestore if we don't already have newer REST/Supabase data
+        const cachedRaw = localStorage.getItem('sembako_cached_products');
+        let currentCachedCount = 0;
+        if (cachedRaw) {
+          try { currentCachedCount = JSON.parse(cachedRaw).length; } catch (_) {}
+        }
 
-        hasRestData = true;
-        onData(products);
+        if (snapshot.docs.length >= currentCachedCount) {
+          const products: ProdukItem[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              kode: data.kode || `SKU-${docSnap.id.substring(0, 5).toUpperCase()}`,
+              barcode: data.barcode || '',
+              nama: data.nama || 'Produk Sembako',
+              kategori: data.kategori || 'Lainnya',
+              hargaBeli: Number(data.hargaBeli) || 0,
+              hargaJual: Number(data.hargaJual) || 0,
+              stok: Number(data.stok) || 0,
+              minStok: Number(data.minStok) || 5,
+              satuan: data.satuan || 'Pcs',
+              gambarUrl: data.gambarUrl || '',
+              deskripsi: data.deskripsi || '',
+              expiredDate: data.expiredDate || '',
+              batchNo: data.batchNo || '',
+              terjual: Number(data.terjual) || 0,
+              createdAt: data.createdAt || new Date().toISOString(),
+              updatedAt: data.updatedAt || new Date().toISOString(),
+            };
+          });
+
+          hasRestData = true;
+          onData(products);
+        }
       },
       (err) => {
         console.warn('Firestore optional product subscription error:', err);

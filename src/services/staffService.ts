@@ -241,7 +241,7 @@ export async function findStaffByCredentials(identifier: string, password: strin
   const cleanId = identifier.trim().toLowerCase();
   const cleanPass = password.trim();
 
-  // Check local first
+  // Instant check local accounts
   const currentList = getLocalStaffAccounts();
   const foundLocal = currentList.find(
     (s) =>
@@ -251,21 +251,6 @@ export async function findStaffByCredentials(identifier: string, password: strin
 
   if (foundLocal) {
     return foundLocal;
-  }
-
-  // Fallback check Firestore
-  try {
-    const q1 = query(collection(db, COLLECTIONS.STAFF_ACCOUNTS), where('username', '==', cleanId));
-    const snap1 = await getDocs(q1);
-    if (!snap1.empty) {
-      const docData = snap1.docs[0].data() as Omit<StaffAccount, 'id'>;
-      if (docData.password === cleanPass || (!docData.password && cleanPass === 'password123') || cleanPass === '123456') {
-        const staff = { id: snap1.docs[0].id, ...docData };
-        return staff;
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to query staff from Firestore:', e);
   }
 
   return null;
