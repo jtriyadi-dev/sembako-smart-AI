@@ -13,6 +13,7 @@ import {
 import { onSnapshot } from 'firebase/firestore';
 import { TransaksiItem, TransaksiDetailItem, RiwayatReturItem } from '../types';
 import { handleFirestoreError, OperationType } from './productService';
+import { getSupabaseClient } from './supabaseClient';
 
 // Subscribe to Realtime Transactions
 export function subscribeTransactions(
@@ -398,7 +399,54 @@ export async function createTransaction(txData: Omit<TransaksiItem, 'id'>): Prom
       createdAt: now,
     };
 
-    // 1. Add Transaction Document
+    // 0. Primary Sync: Supabase PostgreSQL
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('transactions').insert([{
+          kode_transaksi: finalData.kodeTransaksi,
+          tanggal: finalData.tanggal,
+          subtotal: finalData.subtotal,
+          diskon_total: finalData.diskonTotal,
+          pajak_persen: finalData.pajakPersen,
+          pajak_nominal: finalData.pajakNominal,
+          total_harga: finalData.totalHarga,
+          bayar: finalData.bayar,
+          kembalian: finalData.kembalian,
+          metode_pembayaran: finalData.metodePembayaran,
+          status_pembayaran: finalData.statusPembayaran,
+          kasir_nama: finalData.kasirName,
+          catatan: finalData.catatan || null,
+          items: finalData.items,
+          created_at: now
+        }]);
+
+        // Decrement stock in Supabase products
+        for (const item of txData.items) {
+          if (!item.produkId) continue;
+          try {
+            const { data: prodData } = await supabase.from('products').select('stok, terjual').eq('id', item.produkId).single();
+            if (prodData) {
+              const currentStok = Number(prodData.stok) || 0;
+              const currentTerjual = Number(prodData.terjual) || 0;
+              const newStok = Math.max(0, currentStok - item.jumlah);
+              const newTerjual = currentTerjual + item.jumlah;
+              await supabase.from('products').update({
+                stok: newStok,
+                terjual: newTerjual,
+                updated_at: now
+              }).eq('id', item.produkId);
+            }
+          } catch (e) {
+            console.warn('[Supabase Stock Decrement Error]:', e);
+          }
+        }
+      } catch (sbErr) {
+        console.warn('[Supabase Transaction Insert Error]:', sbErr);
+      }
+    }
+
+    // 1. Add Transaction Document to Firestore
     const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
     const docRef = await addDoc(txRef, finalData);
 

@@ -15,6 +15,7 @@ import {
 import { onSnapshot } from 'firebase/firestore';
 import { ProdukItem } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
+import { getSupabaseClient } from './supabaseClient';
 
 export enum OperationType {
   CREATE = 'create',
@@ -79,7 +80,42 @@ const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019
 
 async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
   try {
-    // 1. Try local Express API endpoint first
+    // 1. Try Supabase Client directly first
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const mapped: ProdukItem[] = data.map((r: any) => sanitizeProduct({
+            id: String(r.id),
+            kode: r.kode || `SKU-${String(r.id).substring(0, 5).toUpperCase()}`,
+            barcode: r.barcode || '',
+            nama: r.nama || 'Produk Sembako',
+            kategori: r.kategori || 'Sembako Utama',
+            hargaBeli: Number(r.harga_beli) || 0,
+            hargaJual: Number(r.harga_jual) || 0,
+            stok: Number(r.stok) || 0,
+            minStok: Number(r.min_stok) || 5,
+            satuan: r.satuan || 'Pcs',
+            gambarUrl: r.gambar_url || '',
+            deskripsi: r.deskripsi || '',
+            expiredDate: r.expired_date || '',
+            batchNo: r.batch_no || '',
+            terjual: Number(r.terjual) || 0,
+            createdAt: r.created_at || new Date().toISOString(),
+            updatedAt: r.updated_at || new Date().toISOString(),
+          }));
+          try {
+            localStorage.setItem('sembako_cached_products', JSON.stringify(mapped));
+          } catch (e) {}
+          return mapped;
+        }
+      } catch (e) {
+        console.warn('[ProductService Supabase Fetch Error]:', e);
+      }
+    }
+
+    // 2. Try local Express API endpoint (which also proxies Supabase)
     try {
       const serverRes = await fetch('/api/products');
       if (serverRes.ok) {
@@ -96,7 +132,7 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       // ignore if local API unavailable
     }
 
-    // 2. Try Cloud Store Sync Object
+    // 3. Try Cloud Store Sync Object
     try {
       const cloudRes = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
       if (cloudRes.ok) {
@@ -114,7 +150,7 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       // ignore cloud store fetch error
     }
 
-    // 3. Fallback to localStorage cache
+    // 4. Fallback to localStorage cache
     try {
       const cached = localStorage.getItem('sembako_cached_products');
       if (cached) {
@@ -125,7 +161,7 @@ async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
       }
     } catch (e) {}
 
-    // 4. Fallback to Firestore REST API
+    // 5. Fallback to Firestore REST API
     const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
     const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
     const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?pageSize=300&key=${FIREBASE_API_KEY}`;
@@ -278,7 +314,7 @@ export async function seedSampleProducts(): Promise<void> {
   }
 }
 
-// Add new product to Firestore + Express + Cloud Store
+// Add new product to Supabase + Express + Firestore
 export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<string> {
   const path = COLLECTIONS.PRODUCTS;
   const now = new Date().toISOString();
@@ -303,7 +339,35 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     updatedAt: now,
   };
 
-  // 1. Send POST to Express server & Cloud Store
+  // 1. Insert directly into Supabase (PostgreSQL) if connected
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('products').insert([{
+        id: cleanProduct.id,
+        kode: cleanProduct.kode,
+        barcode: cleanProduct.barcode || null,
+        nama: cleanProduct.nama,
+        kategori: cleanProduct.kategori,
+        harga_beli: cleanProduct.hargaBeli,
+        harga_jual: cleanProduct.hargaJual,
+        stok: cleanProduct.stok,
+        min_stok: cleanProduct.minStok,
+        satuan: cleanProduct.satuan,
+        gambar_url: cleanProduct.gambarUrl || null,
+        deskripsi: cleanProduct.deskripsi || null,
+        expired_date: cleanProduct.expiredDate || null,
+        batch_no: cleanProduct.batchNo || null,
+        terjual: cleanProduct.terjual || 0,
+        created_at: now,
+        updated_at: now,
+      }]);
+    } catch (sbErr) {
+      console.warn('[Supabase Direct Add Product Error]:', sbErr);
+    }
+  }
+
+  // 2. Send POST to Express server (which also syncs backend stores)
   try {
     await fetch('/api/products', {
       method: 'POST',
@@ -314,7 +378,7 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     // ignore
   }
 
-  // 2. Add to Firestore if available
+  // 3. Add to Firestore if available
   try {
     const productsRef = collection(db, path);
     const docRef = await addDoc(productsRef, cleanProduct);
@@ -325,12 +389,37 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
   }
 }
 
-// Update existing product in Firestore + Express + Cloud Store
+// Update existing product in Supabase + Express + Firestore
 export async function updateProduct(id: string, product: Partial<ProdukItem>): Promise<void> {
   const path = `${COLLECTIONS.PRODUCTS}/${id}`;
   const now = new Date().toISOString();
 
-  // 1. Fetch current items and update via Express / Cloud Store
+  // 1. Update directly in Supabase (PostgreSQL) if connected
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const sbUpdate: any = { updated_at: now };
+      if (product.nama !== undefined) sbUpdate.nama = product.nama;
+      if (product.kode !== undefined) sbUpdate.kode = product.kode;
+      if (product.barcode !== undefined) sbUpdate.barcode = product.barcode;
+      if (product.kategori !== undefined) sbUpdate.kategori = product.kategori;
+      if (product.hargaBeli !== undefined) sbUpdate.harga_beli = product.hargaBeli;
+      if (product.hargaJual !== undefined) sbUpdate.harga_jual = product.hargaJual;
+      if (product.stok !== undefined) sbUpdate.stok = product.stok;
+      if (product.minStok !== undefined) sbUpdate.min_stok = product.minStok;
+      if (product.satuan !== undefined) sbUpdate.satuan = product.satuan;
+      if (product.gambarUrl !== undefined) sbUpdate.gambar_url = product.gambarUrl;
+      if (product.deskripsi !== undefined) sbUpdate.deskripsi = product.deskripsi;
+      if (product.expiredDate !== undefined) sbUpdate.expired_date = product.expiredDate;
+      if (product.batchNo !== undefined) sbUpdate.batch_no = product.batchNo;
+      if (product.terjual !== undefined) sbUpdate.terjual = product.terjual;
+      await supabase.from('products').update(sbUpdate).eq('id', id);
+    } catch (sbErr) {
+      console.warn('[Supabase Direct Update Product Error]:', sbErr);
+    }
+  }
+
+  // 2. Fetch current items and update via Express
   try {
     const currentList = await fetchProductsDirectRest();
     const existing = currentList.find(p => p.id === id);
@@ -350,7 +439,7 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
     // ignore
   }
 
-  // 2. Update Firestore if available
+  // 3. Update Firestore if available
   try {
     const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
     const updateData = {
@@ -366,9 +455,21 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
   }
 }
 
-// Delete product from Firestore
+// Delete product from Supabase & Firestore
 export async function deleteProduct(id: string): Promise<void> {
   const path = `${COLLECTIONS.PRODUCTS}/${id}`;
+
+  // 1. Delete from Supabase if connected
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('products').delete().eq('id', id);
+    } catch (sbErr) {
+      console.warn('[Supabase Direct Delete Product Error]:', sbErr);
+    }
+  }
+
+  // 2. Delete from Firestore
   try {
     const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
     await deleteDoc(productRef);

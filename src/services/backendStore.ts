@@ -202,19 +202,177 @@ function saveLocalProductsToFile(): void {
 // Initialize on module load
 loadLocalProductsFromFile();
 
+// Get Supabase configuration if available
+export function getSupabaseConfigBackend(): { url: string; key: string } | null {
+  const url = (process.env.SUPABASE_URL || inMemoryApiKeys.supabaseUrl || '').trim().replace(/\/+$/, '');
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || inMemoryApiKeys.supabaseServiceRoleKey || inMemoryApiKeys.supabaseAnonKey || '').trim();
+  if (url && key && url.startsWith('https://')) {
+    return { url, key };
+  }
+  return null;
+}
+
+// Fetch products directly from Supabase Cloud Database (PostgreSQL)
+export async function fetchProductsFromSupabaseBackend(): Promise<ProdukItem[]> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return [];
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/products?select=*&order=created_at.desc`, {
+      method: 'GET',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0) {
+      const mapped = rows.map((r: any) => ({
+        id: String(r.id),
+        kode: r.kode || `SKU-${String(r.id).substring(0, 5).toUpperCase()}`,
+        barcode: r.barcode || '',
+        nama: r.nama || 'Produk Sembako',
+        kategori: r.kategori || 'Sembako Utama',
+        hargaBeli: Number(r.harga_beli) || 0,
+        hargaJual: Number(r.harga_jual) || 0,
+        stok: Number(r.stok) || 0,
+        minStok: Number(r.min_stok) || 5,
+        satuan: r.satuan || 'Pcs',
+        gambarUrl: r.gambar_url || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400',
+        deskripsi: r.deskripsi || '',
+        expiredDate: r.expired_date || '',
+        batchNo: r.batch_no || '',
+        terjual: Number(r.terjual) || 0,
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
+      }));
+
+      // Update in-memory cache with Supabase products
+      inMemoryProducts = mapped;
+      saveLocalProductsToFile();
+      return mapped;
+    }
+  } catch (err: any) {
+    console.warn('[BackendStore Supabase Fetch Error]:', err?.message);
+  }
+  return [];
+}
+
+// Sync single product to Supabase
+export async function syncProductToSupabaseBackend(p: ProdukItem): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const payload = {
+      id: p.id,
+      kode: p.kode,
+      barcode: p.barcode || null,
+      nama: p.nama,
+      kategori: p.kategori || 'Sembako Utama',
+      harga_beli: p.hargaBeli,
+      harga_jual: p.hargaJual,
+      stok: p.stok,
+      min_stok: p.minStok || 5,
+      satuan: p.satuan || 'Pcs',
+      gambar_url: p.gambarUrl || null,
+      deskripsi: p.deskripsi || null,
+      expired_date: p.expiredDate || null,
+      batch_no: p.batchNo || null,
+      terjual: p.terjual || 0,
+      updated_at: p.updatedAt || new Date().toISOString(),
+      created_at: p.createdAt || new Date().toISOString()
+    };
+
+    const res = await fetch(`${sb.url}/rest/v1/products`, {
+      method: 'POST',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(payload)
+    });
+    return res.ok;
+  } catch (err: any) {
+    console.warn('[BackendStore Supabase Insert/Upsert Error]:', err?.message);
+    return false;
+  }
+}
+
+// Update product stock in Supabase
+export async function updateSupabaseProductStockBackend(productId: string, newStock: number, now: string): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/products?id=eq.${productId}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({
+        stok: newStock,
+        updated_at: now
+      })
+    });
+    return res.ok;
+  } catch (err: any) {
+    console.warn('[BackendStore Supabase Stock Patch Error]:', err?.message);
+    return false;
+  }
+}
+
+// Record Webhook Event in Supabase
+export async function logWebhookToSupabaseBackend(log: { sender: string; messageText: string; rawBody: any; status: string; actionTaken: string }): Promise<void> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return;
+  try {
+    await fetch(`${sb.url}/rest/v1/webhook_logs`, {
+      method: 'POST',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        sender: log.sender,
+        message_text: log.messageText,
+        raw_body: log.rawBody,
+        status: log.status,
+        action_taken: log.actionTaken,
+        created_at: new Date().toISOString()
+      })
+    });
+  } catch (err: any) {
+    // Non-blocking log write
+  }
+}
+
 export function getProductsBackend(): ProdukItem[] {
+  // Trigger background refresh from Supabase if configured
+  fetchProductsFromSupabaseBackend().catch(() => {});
   return [...inMemoryProducts];
 }
 
 export function saveProductBackend(product: ProdukItem): ProdukItem {
   const existingIdx = inMemoryProducts.findIndex(p => p.id === product.id);
+  const now = new Date().toISOString();
+  const clean = { ...product, updatedAt: now };
   if (existingIdx >= 0) {
-    inMemoryProducts[existingIdx] = { ...product, updatedAt: new Date().toISOString() };
+    inMemoryProducts[existingIdx] = clean;
   } else {
-    inMemoryProducts.unshift({ ...product, updatedAt: new Date().toISOString() });
+    inMemoryProducts.unshift(clean);
   }
   saveLocalProductsToFile();
-  return product;
+  
+  // Sync to Supabase in background
+  syncProductToSupabaseBackend(clean).catch(() => {});
+  return clean;
 }
 
 function parseFirestoreField(fieldObj: any): any {
@@ -294,6 +452,11 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
     const targetName = (input?.nama || 'Produk').toString().trim();
     const now = new Date().toISOString();
 
+    // 0. Ensure we have the latest Supabase products loaded into memory
+    try {
+      await fetchProductsFromSupabaseBackend();
+    } catch (_) {}
+
     const { product: matchedProduct, index: matchedIndex } = findMatchingProduct(targetName);
 
     if (matchedProduct && matchedIndex >= 0) {
@@ -316,7 +479,14 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
       inMemoryProducts[matchedIndex] = updatedProduct;
       saveLocalProductsToFile();
 
-      // Try updating Firestore REST API as secondary sync
+      // Primary Sync: Update Supabase Cloud Database (PostgreSQL)
+      try {
+        await updateSupabaseProductStockBackend(matchedProduct.id, newTotalStock, now);
+      } catch (err: any) {
+        console.warn('[Supabase Stock Update Error]:', err?.message);
+      }
+
+      // Secondary Firestore REST Sync
       try {
         const patchUrl = `${BASE_FIRESTORE_URL}/products/${matchedProduct.id}?updateMask.fieldPaths=stok&updateMask.fieldPaths=updatedAt&key=${FIREBASE_API_KEY}`;
         fetch(patchUrl, {
@@ -340,6 +510,15 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
                   `📊 Total Stok Sekarang: ${newTotalStock} ${satuanStr}`;
 
       console.log(`[BackendStore SUCCESS] Updated "${matchedProduct.nama}": ${oldStock} -> ${newTotalStock}`);
+
+      // Log webhook to Supabase
+      logWebhookToSupabaseBackend({
+        sender: input.sender || 'WhatsApp',
+        messageText: `STOK#${matchedProduct.nama}#+${addedStock}`,
+        rawBody: input,
+        status: 'success',
+        actionTaken: `Stok "${matchedProduct.nama}" diperbarui: ${oldStock} -> ${newTotalStock}`
+      }).catch(() => {});
 
       return {
         message: msg,
@@ -380,7 +559,14 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
       inMemoryProducts.unshift(newProd);
       saveLocalProductsToFile();
 
-      // Try POST to Firestore REST API as secondary sync
+      // Primary Sync: Insert into Supabase Cloud Database (PostgreSQL)
+      try {
+        await syncProductToSupabaseBackend(newProd);
+      } catch (err: any) {
+        console.warn('[Supabase New Product Insert Error]:', err?.message);
+      }
+
+      // Secondary Firestore REST Sync
       try {
         const postUrl = `${BASE_FIRESTORE_URL}/products?key=${FIREBASE_API_KEY}`;
         fetch(postUrl, {
@@ -412,6 +598,15 @@ export async function processProductWebhook(input: ProductInput): Promise<{ mess
       const msg = `✅ [POS Toko Sembako] Produk baru "${input.nama}" BERHASIL DITAMBAHKAN ke katalog toko dengan stok awal ${input.stok} ${satuan}!`;
 
       console.log(`[BackendStore SUCCESS] Created new product "${input.nama}" with stok ${input.stok}`);
+
+      // Log webhook to Supabase
+      logWebhookToSupabaseBackend({
+        sender: input.sender || 'WhatsApp',
+        messageText: `PRODUK#${input.nama}#${newProd.kategori}#${hargaBeli}#${hargaJual}#${input.stok}`,
+        rawBody: input,
+        status: 'success',
+        actionTaken: `Produk baru "${input.nama}" ditambahkan ke Supabase Cloud (Stok: ${input.stok})`
+      }).catch(() => {});
 
       return {
         message: msg,

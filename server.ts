@@ -7,6 +7,8 @@ import {
   processStockUpdateWebhook, 
   getProductsBackend, 
   saveProductBackend,
+  fetchProductsFromSupabaseBackend,
+  syncProductToSupabaseBackend,
   getRemoteConfigBackend,
   saveRemoteConfigBackend,
   getCrmUsersBackend,
@@ -54,19 +56,26 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  // GET /api/products - Direct Fast REST Endpoint for Products List
-  app.get("/api/products", (req, res) => {
+  // GET /api/products - Direct Fast REST Endpoint for Products List (Supabase + In-Memory)
+  app.get("/api/products", async (req, res) => {
+    try {
+      const sbProducts = await fetchProductsFromSupabaseBackend();
+      if (sbProducts && sbProducts.length > 0) {
+        return res.json({ status: "ok", count: sbProducts.length, products: sbProducts, source: "supabase" });
+      }
+    } catch (e) {}
     const products = getProductsBackend();
-    res.json({ status: "ok", count: products.length, products });
+    res.json({ status: "ok", count: products.length, products, source: "local" });
   });
 
   // POST /api/products - Save or update product directly
-  app.post("/api/products", (req, res) => {
+  app.post("/api/products", async (req, res) => {
     const prod = req.body;
     if (!prod || !prod.nama) {
       return res.status(400).json({ error: "Nama produk wajib diisi" });
     }
     const saved = saveProductBackend(prod);
+    await syncProductToSupabaseBackend(saved).catch(() => {});
     res.json({ status: "ok", product: saved });
   });
 
