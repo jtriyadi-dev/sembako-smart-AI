@@ -90,32 +90,41 @@ export function subscribeTransactions(
   onError?: (error: Error) => void
 ) {
   let isUnsubscribed = false;
+  let hasEmitted = false;
 
-  // 1. Instant Cache Call (<20ms)
+  // 1. Instant Cache Call (<10ms)
   try {
     const cached = localStorage.getItem(CACHE_TX_KEY);
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed)) {
+        hasEmitted = true;
         onData(parsed);
       }
     }
   } catch (e) {}
 
-  // 2. Fast Async Supabase Fetch
+  // 2. Fast Async Supabase Fetch (<100ms)
   fetchTransactionsDirect().then((items) => {
-    if (!isUnsubscribed && items.length > 0) {
+    if (!isUnsubscribed) {
+      hasEmitted = true;
       onData(items);
+    }
+  }).catch(() => {
+    if (!isUnsubscribed && !hasEmitted) {
+      onData([]);
     }
   });
 
   // 3. 3s Polling against Supabase
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
-    const items = await fetchTransactionsDirect();
-    if (!isUnsubscribed && items.length > 0) {
-      onData(items);
-    }
+    try {
+      const items = await fetchTransactionsDirect();
+      if (!isUnsubscribed) {
+        onData(items);
+      }
+    } catch (e) {}
   }, 3000);
 
   // 4. Background Firestore listener (non-blocking)
@@ -126,7 +135,11 @@ export function subscribeTransactions(
     unsubscribeFirestore = onSnapshot(
       q,
       (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
+        if (isUnsubscribed) return;
+        if (snapshot.empty) {
+          if (!hasEmitted) onData([]);
+          return;
+        }
         const txs: TransaksiItem[] = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
           return {

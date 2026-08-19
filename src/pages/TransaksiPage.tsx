@@ -64,8 +64,14 @@ export const TransaksiPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  // Subscribe to Firestore Realtime
+  // Subscribe to Realtime Supabase / Firestore
   useEffect(() => {
+    setIsLoading(true);
+
+    const safetyTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 400);
+
     const unsubscribe = subscribeTransactions(
       (data) => {
         setTransactions(data);
@@ -74,10 +80,13 @@ export const TransaksiPage: React.FC = () => {
       (err) => {
         console.error('Transactions fetch error:', err);
         setIsLoading(false);
-        toastError('Koneksi Firestore', 'Gagal memuat daftar transaksi.');
       }
     );
-    return () => unsubscribe();
+
+    return () => {
+      clearTimeout(safetyTimer);
+      unsubscribe();
+    };
   }, []);
 
   // Filter Logic
@@ -219,7 +228,7 @@ export const TransaksiPage: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 mb-2">
             <Receipt className="w-3.5 h-3.5" />
-            <span>Audit & Riwayat Transaksi Firestore</span>
+            <span>Audit & Riwayat Transaksi Realtime</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-emerald-900 via-emerald-700 to-amber-600 dark:from-emerald-200 dark:via-emerald-300 dark:to-amber-300 bg-clip-text text-transparent">
             Riwayat Penjualan Toko

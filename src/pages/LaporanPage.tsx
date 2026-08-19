@@ -76,6 +76,12 @@ export const LaporanPage: React.FC = () => {
 
   // Subscribe to Transactions & Products in Realtime
   useEffect(() => {
+    setIsLoading(true);
+
+    const safetyTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 400);
+
     let untermTx: (() => void) | null = null;
     let untermProd: (() => void) | null = null;
 
@@ -93,11 +99,16 @@ export const LaporanPage: React.FC = () => {
     untermProd = subscribeProducts(
       (data) => {
         setProducts(data);
+        setIsLoading(false);
       },
-      (err) => console.error('Laporan prod sub error:', err)
+      (err) => {
+        console.error('Laporan prod sub error:', err);
+        setIsLoading(false);
+      }
     );
 
     return () => {
+      clearTimeout(safetyTimer);
       if (untermTx) untermTx();
       if (untermProd) untermProd();
     };

@@ -76,18 +76,34 @@ export const StokPage: React.FC = () => {
   const [selectedProductForAction, setSelectedProductForAction] = useState<ProdukItem | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Subscribe Realtime Firestore
+  // Subscribe Realtime Supabase / Firestore
   useEffect(() => {
     setIsLoading(true);
 
+    const safetyTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 400);
+
     const unsubProducts = subscribeProducts(
-      (data) => setProducts(data),
-      (err) => console.error('Products sub error:', err)
+      (data) => {
+        setProducts(data);
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Products sub error:', err);
+        setIsLoading(false);
+      }
     );
 
     const unsubMovements = subscribeStockMovements(
-      (data) => setMovements(data),
-      (err) => console.error('Movements sub error:', err)
+      (data) => {
+        setMovements(data);
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Movements sub error:', err);
+        setIsLoading(false);
+      }
     );
 
     const unsubOpnames = subscribeStockOpnames(
@@ -104,6 +120,7 @@ export const StokPage: React.FC = () => {
     const unsubSuppliers = subscribeSuppliers((data) => setSuppliers(data));
 
     return () => {
+      clearTimeout(safetyTimer);
       unsubProducts();
       unsubSuppliers();
       unsubMovements();
@@ -309,7 +326,7 @@ export const StokPage: React.FC = () => {
             Pengendalian Stok & Audit Inventaris
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Realtime Firestore: Catat stok masuk distributor, stok keluar, penyesuaian, stock opname fisik, & tanggal kedaluwarsa.
+            Realtime Supabase & PostgreSQL: Catat stok masuk distributor, stok keluar, penyesuaian, stock opname fisik, & tanggal kedaluwarsa.
           </p>
         </div>
 

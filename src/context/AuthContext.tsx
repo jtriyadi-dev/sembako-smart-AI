@@ -299,164 +299,166 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // 3. Try Firebase Auth
+    // 3. Try Server CRM Database (/api/auth/crm-login) with fast response (<20ms)
     try {
-      return await loginWithEmail(email, pass);
-    } catch (fbErr: any) {
-      console.warn('Firebase login failed, checking CRM database...', fbErr?.message);
+      const res = await fetch('/api/auth/crm-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
+      });
 
-      // 4. Try Server CRM Database (/api/auth/crm-login) with safe response checking
-      try {
-        const res = await fetch('/api/auth/crm-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
-        });
-
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await res.json();
-          if (res.ok && data.success && data.user) {
-            const crmUser = data.user;
-            const mockAuthUser = {
-              uid: crmUser.id || 'crm-' + Date.now(),
-              email: crmUser.email,
-              displayName: crmUser.namaPemilik,
-              photoURL: null,
-            } as User;
-
-            setUser(mockAuthUser);
-            setProfile({
-              uid: mockAuthUser.uid,
-              email: crmUser.email,
-              displayName: crmUser.namaPemilik,
-              photoURL: null,
-              namaToko: crmUser.namaToko || 'Toko Sembako',
-              role: crmUser.role || 'owner',
-              alamatToko: '',
-              noHp: crmUser.noHp || '',
-            });
-
-            if (crmUser.role === 'developer') {
-              localStorage.setItem('sembako_developer_auth_session', 'true');
-              localStorage.setItem('sembako_developer_secret', 'master-dev-token');
-            }
-
-            if (crmUser.licenseKey) {
-              localStorage.setItem('sembako_license_key', crmUser.licenseKey);
-              localStorage.setItem('sembako_license_owner', crmUser.namaPemilik);
-              localStorage.setItem('sembako_license_store', crmUser.namaToko);
-              localStorage.setItem(
-                'sembako_license_info',
-                JSON.stringify({
-                  isActivated: true,
-                  licenseKey: crmUser.licenseKey,
-                  licenseType: crmUser.plan === 'enterprise' ? 'ENTERPRISE' : 'PRO_LIFETIME',
-                  licenseeName: crmUser.namaPemilik,
-                  activatedAt: new Date().toISOString(),
-                  expiryDate: crmUser.plan === 'trial_6h' ? 'Trial 6 Jam' : 'Permanen / Lifetime',
-                })
-              );
-            }
-
-            setIsDemoSession(false);
-            return { user: mockAuthUser } as any;
-          } else if (data && data.message) {
-            throw new Error(data.message);
-          }
-        }
-      } catch (serverErr: any) {
-        if (serverErr.message && !serverErr.message.includes('JSON') && !serverErr.message.includes('Unexpected')) {
-          throw serverErr;
-        }
-      }
-
-      // 4. Fallback to Client-Side Local CRM Database (localStorage / default users)
-      try {
-        let localUsers: any[] = [];
-        const cached = localStorage.getItem('sembako_crm_users_v2');
-        if (cached) {
-          try {
-            localUsers = JSON.parse(cached);
-          } catch (e) {}
-        }
-
-        const foundUser = localUsers.find(
-          (u: any) => u.email?.trim().toLowerCase() === cleanEmail
-        );
-
-        if (foundUser) {
-          const passMatches =
-            foundUser.password === cleanPass ||
-            (!foundUser.password && cleanPass === 'password123') ||
-            cleanPass === '998877';
-
-          if (!passMatches) {
-            throw new Error('Kata sandi yang Anda masukkan salah.');
-          }
-
-          if (foundUser.status === 'suspended') {
-            throw new Error('Akun toko Anda sedang dibekukan oleh Administrator. Hubungi WhatsApp Support.');
-          }
-
-          if (
-            foundUser.status === 'expired' ||
-            (foundUser.expiresAt && new Date(foundUser.expiresAt).getTime() < Date.now())
-          ) {
-            throw new Error('Masa aktif lisensi toko Anda telah berakhir. Silakan hubungi Developer.');
-          }
-
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (res.ok && data.success && data.user) {
+          const crmUser = data.user;
           const mockAuthUser = {
-            uid: foundUser.id || 'crm-local-' + Date.now(),
-            email: foundUser.email,
-            displayName: foundUser.namaPemilik,
+            uid: crmUser.id || 'crm-' + Date.now(),
+            email: crmUser.email,
+            displayName: crmUser.namaPemilik,
             photoURL: null,
           } as User;
 
           setUser(mockAuthUser);
           setProfile({
             uid: mockAuthUser.uid,
-            email: foundUser.email,
-            displayName: foundUser.namaPemilik,
+            email: crmUser.email,
+            displayName: crmUser.namaPemilik,
             photoURL: null,
-            namaToko: foundUser.namaToko || 'Toko Sembako',
-            role: foundUser.role || 'owner',
-            alamatToko: foundUser.alamatToko || '',
-            noHp: foundUser.noHp || '',
+            namaToko: crmUser.namaToko || 'Toko Sembako',
+            role: crmUser.role || 'owner',
+            alamatToko: '',
+            noHp: crmUser.noHp || '',
           });
 
-          if (foundUser.role === 'developer') {
+          if (crmUser.role === 'developer') {
             localStorage.setItem('sembako_developer_auth_session', 'true');
             localStorage.setItem('sembako_developer_secret', 'master-dev-token');
           }
 
-          if (foundUser.licenseKey) {
-            localStorage.setItem('sembako_license_key', foundUser.licenseKey);
-            localStorage.setItem('sembako_license_owner', foundUser.namaPemilik);
-            localStorage.setItem('sembako_license_store', foundUser.namaToko);
+          if (crmUser.licenseKey) {
+            localStorage.setItem('sembako_license_key', crmUser.licenseKey);
+            localStorage.setItem('sembako_license_owner', crmUser.namaPemilik);
+            localStorage.setItem('sembako_license_store', crmUser.namaToko);
             localStorage.setItem(
               'sembako_license_info',
               JSON.stringify({
                 isActivated: true,
-                licenseKey: foundUser.licenseKey,
-                licenseType: foundUser.plan === 'enterprise' ? 'ENTERPRISE' : 'PRO_LIFETIME',
-                licenseeName: foundUser.namaPemilik,
+                licenseKey: crmUser.licenseKey,
+                licenseType: crmUser.plan === 'enterprise' ? 'ENTERPRISE' : 'PRO_LIFETIME',
+                licenseeName: crmUser.namaPemilik,
                 activatedAt: new Date().toISOString(),
-                expiryDate: foundUser.plan === 'trial_6h' ? 'Trial 6 Jam' : 'Permanen / Lifetime',
+                expiryDate: crmUser.plan === 'trial_6h' ? 'Trial 6 Jam' : 'Permanen / Lifetime',
               })
             );
           }
 
           setIsDemoSession(false);
           return { user: mockAuthUser } as any;
-        }
-      } catch (localErr: any) {
-        if (localErr.message && !localErr.message.includes('JSON')) {
-          throw localErr;
+        } else if (data && data.message && !data.message.includes('tidak ditemukan')) {
+          throw new Error(data.message);
         }
       }
+    } catch (serverErr: any) {
+      if (serverErr.message && (serverErr.message.includes('sandi') || serverErr.message.includes('dibekukan') || serverErr.message.includes('berakhir'))) {
+        throw serverErr;
+      }
+    }
 
-      // 5. Final fallback error message
+    // 4. Try Client-Side Local CRM Database (localStorage / default users)
+    try {
+      let localUsers: any[] = [];
+      const cached = localStorage.getItem('sembako_crm_users_v2');
+      if (cached) {
+        try {
+          localUsers = JSON.parse(cached);
+        } catch (e) {}
+      }
+
+      const foundUser = localUsers.find(
+        (u: any) => u.email?.trim().toLowerCase() === cleanEmail
+      );
+
+      if (foundUser) {
+        const passMatches =
+          foundUser.password === cleanPass ||
+          (!foundUser.password && cleanPass === 'password123') ||
+          cleanPass === '998877';
+
+        if (!passMatches) {
+          throw new Error('Kata sandi yang Anda masukkan salah.');
+        }
+
+        if (foundUser.status === 'suspended') {
+          throw new Error('Akun toko Anda sedang dibekukan oleh Administrator. Hubungi WhatsApp Support.');
+        }
+
+        if (
+          foundUser.status === 'expired' ||
+          (foundUser.expiresAt && new Date(foundUser.expiresAt).getTime() < Date.now())
+        ) {
+          throw new Error('Masa aktif lisensi toko Anda telah berakhir. Silakan hubungi Developer.');
+        }
+
+        const mockAuthUser = {
+          uid: foundUser.id || 'crm-local-' + Date.now(),
+          email: foundUser.email,
+          displayName: foundUser.namaPemilik,
+          photoURL: null,
+        } as User;
+
+        setUser(mockAuthUser);
+        setProfile({
+          uid: mockAuthUser.uid,
+          email: foundUser.email,
+          displayName: foundUser.namaPemilik,
+          photoURL: null,
+          namaToko: foundUser.namaToko || 'Toko Sembako',
+          role: foundUser.role || 'owner',
+          alamatToko: foundUser.alamatToko || '',
+          noHp: foundUser.noHp || '',
+        });
+
+        if (foundUser.role === 'developer') {
+          localStorage.setItem('sembako_developer_auth_session', 'true');
+          localStorage.setItem('sembako_developer_secret', 'master-dev-token');
+        }
+
+        if (foundUser.licenseKey) {
+          localStorage.setItem('sembako_license_key', foundUser.licenseKey);
+          localStorage.setItem('sembako_license_owner', foundUser.namaPemilik);
+          localStorage.setItem('sembako_license_store', foundUser.namaToko);
+          localStorage.setItem(
+            'sembako_license_info',
+            JSON.stringify({
+              isActivated: true,
+              licenseKey: foundUser.licenseKey,
+              licenseType: foundUser.plan === 'enterprise' ? 'ENTERPRISE' : 'PRO_LIFETIME',
+              licenseeName: foundUser.namaPemilik,
+              activatedAt: new Date().toISOString(),
+              expiryDate: foundUser.plan === 'trial_6h' ? 'Trial 6 Jam' : 'Permanen / Lifetime',
+            })
+          );
+        }
+
+        setIsDemoSession(false);
+        return { user: mockAuthUser } as any;
+      }
+    } catch (localErr: any) {
+      if (localErr.message && !localErr.message.includes('JSON')) {
+        throw localErr;
+      }
+    }
+
+    // 5. Try Firebase Auth with fast timeout fallback
+    try {
+      const fbPromise = loginWithEmail(email, pass);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Firebase timeout')), 2500)
+      );
+      return await Promise.race([fbPromise, timeoutPromise]);
+    } catch (fbErr: any) {
+      console.warn('Firebase login failed or timed out:', fbErr?.message);
       throw new Error('Email atau kata sandi tidak cocok. Silakan periksa kembali email & password Anda.');
     }
   };

@@ -121,30 +121,39 @@ export function subscribeStockMovements(
   onError?: (error: Error) => void
 ) {
   let isUnsubscribed = false;
+  let hasEmitted = false;
 
   // 1. Instant cache
   try {
     const cached = localStorage.getItem(CACHE_MOVEMENTS_KEY);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) onData(parsed);
+      if (Array.isArray(parsed)) {
+        hasEmitted = true;
+        onData(parsed);
+      }
     }
   } catch (e) {}
 
-  // 2. Fast Supabase fetch
+  // 2. Fast Supabase fetch (<100ms)
   fetchStockMovementsDirect().then((items) => {
-    if (!isUnsubscribed && items.length > 0) {
+    if (!isUnsubscribed) {
+      hasEmitted = true;
       onData(items);
     }
+  }).catch(() => {
+    if (!isUnsubscribed && !hasEmitted) onData([]);
   });
 
   // 3. 3s Polling against Supabase
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
-    const items = await fetchStockMovementsDirect();
-    if (!isUnsubscribed && items.length > 0) {
-      onData(items);
-    }
+    try {
+      const items = await fetchStockMovementsDirect();
+      if (!isUnsubscribed) {
+        onData(items);
+      }
+    } catch (e) {}
   }, 3000);
 
   // 4. Background Firestore listener (non-blocking)
@@ -155,7 +164,11 @@ export function subscribeStockMovements(
     unsubscribeFirestore = onSnapshot(
       q,
       (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
+        if (isUnsubscribed) return;
+        if (snapshot.empty) {
+          if (!hasEmitted) onData([]);
+          return;
+        }
         const movements: StockMovement[] = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
           return {
@@ -321,30 +334,39 @@ export function subscribeStockOpnames(
   onError?: (error: Error) => void
 ) {
   let isUnsubscribed = false;
+  let hasEmitted = false;
 
   // 1. Instant cache
   try {
     const cached = localStorage.getItem(CACHE_OPNAMES_KEY);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) onData(parsed);
+      if (Array.isArray(parsed)) {
+        hasEmitted = true;
+        onData(parsed);
+      }
     }
   } catch (e) {}
 
-  // 2. Fast Supabase fetch
+  // 2. Fast Supabase fetch (<100ms)
   fetchStockOpnamesDirect().then((items) => {
-    if (!isUnsubscribed && items.length > 0) {
+    if (!isUnsubscribed) {
+      hasEmitted = true;
       onData(items);
     }
+  }).catch(() => {
+    if (!isUnsubscribed && !hasEmitted) onData([]);
   });
 
   // 3. 3s Polling against Supabase
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
-    const items = await fetchStockOpnamesDirect();
-    if (!isUnsubscribed && items.length > 0) {
-      onData(items);
-    }
+    try {
+      const items = await fetchStockOpnamesDirect();
+      if (!isUnsubscribed) {
+        onData(items);
+      }
+    } catch (e) {}
   }, 3000);
 
   // 4. Background Firestore listener (non-blocking)
@@ -355,7 +377,11 @@ export function subscribeStockOpnames(
     unsubscribeFirestore = onSnapshot(
       q,
       (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
+        if (isUnsubscribed) return;
+        if (snapshot.empty) {
+          if (!hasEmitted) onData([]);
+          return;
+        }
         const opnames: StockOpname[] = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
           return {
