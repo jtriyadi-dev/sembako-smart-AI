@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { ProdukItem } from '../types';
 import { addProduct } from '../services/productService';
@@ -42,16 +42,36 @@ export const WhatsAppIntegrationModal: React.FC<WhatsAppIntegrationModalProps> =
   const [botSenderNumber, setBotSenderNumber] = useState('6281234567890');
   const [botMessage, setBotMessage] = useState('PRODUK#Minyak Bimoli 2L#Minyak & Margarin#32000#36500#30#pouch#5');
   const [isBotProcessing, setIsBotProcessing] = useState(false);
-  const [webhookLogs, setWebhookLogs] = useState<Array<{ id: string; time: string; sender: string; message: string; status: 'success' | 'error'; detail: string }>>([
-    {
-      id: '1',
-      time: new Date().toLocaleTimeString('id-ID'),
-      sender: '6281234567890',
-      message: 'PRODUK#Beras Sania 5kg#Beras & Tepung#65000#72000#20#sak#5',
-      status: 'success',
-      detail: 'Otomatis menambahkan 1 produk "Beras Sania 5kg" ke Katalog Database',
-    },
-  ]);
+  const [webhookLogs, setWebhookLogs] = useState<Array<{ id: string; time: string; sender: string; message: string; status: 'success' | 'error' | 'ignored'; detail: string }>>([]);
+
+  const loadServerWebhookLogs = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/logs');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
+          setWebhookLogs(
+            data.logs.map((l: any, idx: number) => ({
+              id: l.id || String(idx),
+              time: l.time || new Date().toLocaleTimeString('id-ID'),
+              sender: l.sender || 'WhatsApp User',
+              message: l.messageText || l.message || '',
+              status: l.status || 'success',
+              detail: l.actionTaken || 'Diproses oleh server',
+            }))
+          );
+        }
+      }
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'bot-sim') {
+      loadServerWebhookLogs();
+      const interval = setInterval(loadServerWebhookLogs, 2500);
+      return () => clearInterval(interval);
+    }
+  }, [isOpen, activeTab]);
 
   // --- TAB 1: INPUT KATALOG VIA WHATSAPP ---
   const [rawText, setRawText] = useState('');
@@ -741,25 +761,33 @@ Minyak Filma 2L, Beli 32000, Jual 36000, Stok 15, Satuan pouch`;
                   <span className="text-[10px] text-emerald-400 font-mono">{webhookLogs.length} Event</span>
                 </h5>
                 <div className="max-h-40 overflow-y-auto space-y-1.5 font-mono text-[11px]">
-                  {webhookLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-2"
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-amber-400 font-bold">[{log.time}]</span>
-                          <span className="text-slate-300">Pengirim: {log.sender}</span>
-                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                            200 OK
-                          </span>
-                        </div>
-                        <p className="text-slate-400 text-[10px]">Pesan: "{log.message}"</p>
-                        <p className="text-emerald-400 font-bold text-[11px]">{log.detail}</p>
-                      </div>
-                      <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  {webhookLogs.length === 0 ? (
+                    <div className="p-3 text-center text-slate-500 text-[10px]">
+                      Belum ada pesan yang masuk. Kirim pesan ke bot WA atau gunakan tombol simulasi di atas.
                     </div>
-                  ))}
+                  ) : (
+                    webhookLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-2"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-400 font-bold">[{log.time}]</span>
+                            <span className="text-slate-300">Pengirim: {log.sender}</span>
+                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                              log.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                            }`}>
+                              {log.status === 'success' ? '200 OK' : 'ERR'}
+                            </span>
+                          </div>
+                          <p className="text-slate-400 text-[10px]">Pesan: "{log.message}"</p>
+                          <p className="text-emerald-400 font-bold text-[11px]">{log.detail}</p>
+                        </div>
+                        <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -14,6 +15,10 @@ import {
   getCrmUsersBackend,
   saveCrmUserBackend,
   deleteCrmUserBackend,
+  getStaffBackend,
+  saveStaffBackend,
+  deleteStaffBackend,
+  authenticateUserBackend,
   getApiKeysBackend,
   saveApiKeysBackend
 } from "./src/services/backendStore";
@@ -29,7 +34,28 @@ interface WebhookLog {
   parsedProduct?: any;
 }
 
-const recentWebhooks: WebhookLog[] = [];
+const LOCAL_WEBHOOKS_FILE = path.join('/tmp', 'webhookLogs.json');
+
+function loadWebhookLogs(): WebhookLog[] {
+  try {
+    if (fs.existsSync(LOCAL_WEBHOOKS_FILE)) {
+      const data = fs.readFileSync(LOCAL_WEBHOOKS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveWebhookLogs(logs: WebhookLog[]): void {
+  try {
+    const dir = path.dirname(LOCAL_WEBHOOKS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LOCAL_WEBHOOKS_FILE, JSON.stringify(logs.slice(0, 100), null, 2), 'utf-8');
+  } catch (e) {}
+}
+
+const recentWebhooks: WebhookLog[] = loadWebhookLogs();
 const pendingProducts: any[] = [];
 
 async function startServer() {
@@ -79,40 +105,44 @@ async function startServer() {
     res.json({ status: "ok", product: saved });
   });
 
-  // GET /api/whatsapp/webhook - Verification endpoint for Webhook Setup
-  app.get("/api/whatsapp/webhook", (req, res) => {
-    const hubChallenge = req.query["hub.challenge"];
-    if (hubChallenge) {
-      return res.send(hubChallenge);
-    }
-    res.json({
-      status: "active",
-      message: "WhatsApp Webhook Endpoint POS Toko Sembako Siap Menerima HTTP POST",
-      webhookUrl: `${req.protocol}://${req.get("host")}/api/whatsapp/webhook`,
-      documentation: "Kirim HTTP POST ke endpoint ini dengan payload JSON/Form dari Fonnte, Wablas, Whacenter, atau Custom Bot.",
-      supportedFormat: "PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok ATAU STOK#Nama#TambahanStok",
-      totalWebhooksReceived: recentWebhooks.length
-    });
-  });
-
-  // GET /api/whatsapp/webhook - Webhook Verification / Ping Check
-  app.get("/api/whatsapp/webhook", (req, res) => {
-    // Support Meta hub.challenge verification if provided
-    const hubChallenge = req.query['hub.challenge'] || req.query['challenge'];
+  // GET /api/whatsapp/webhook - Verification & Test endpoint
+  app.get("/api/whatsapp/webhook", async (req, res) => {
+    // Support Meta / Cloud API hub.challenge verification
+    const hubChallenge = req.query["hub.challenge"] || req.query["challenge"];
     if (hubChallenge) {
       return res.send(String(hubChallenge));
     }
+
+    // Support GET query testing (e.g. /api/whatsapp/webhook?sender=62812&message=PRODUK#...)
+    const queryMsg = (req.query.message || req.query.msg || req.query.text || "").toString().trim();
+    if (queryMsg) {
+      const sender = (req.query.sender || req.query.from || req.query.phone || "WhatsApp Browser Test").toString();
+      const logItem: WebhookLog = {
+        id: Date.now().toString(),
+        time: new Date().toLocaleTimeString("id-ID"),
+        sender,
+        rawBody: req.query,
+        messageText: queryMsg,
+        status: "success",
+        actionTaken: "Pesan diterima via HTTP GET Query"
+      };
+      recentWebhooks.unshift(logItem);
+      saveWebhookLogs(recentWebhooks);
+      return res.json({ status: "success", received: queryMsg, sender, logsCount: recentWebhooks.length });
+    }
+
     res.json({
       status: "active",
       service: "Sembako Smart AI WhatsApp Webhook Listener",
       endpoint: "/api/whatsapp/webhook",
-      method: "POST",
-      instructions: "Kirim payload pesan WhatsApp via POST dengan format JSON atau FormData ke URL ini.",
+      methodsSupported: ["GET", "POST"],
+      documentation: "Kirim HTTP POST ke endpoint ini dengan payload JSON/Form dari Fonnte, Wablas, Whacenter, Meta API, atau Custom Bot.",
       supportedCommands: [
         "PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok",
         "STOK#NamaProduk#JumlahTambah",
         "!stok (Cek Ringkasan Stok Toko)"
-      ]
+      ],
+      totalWebhooksReceived: recentWebhooks.length
     });
   });
 
@@ -128,14 +158,18 @@ async function startServer() {
         body = body.data[0];
       }
       
-      // Extract sender and message text from various WA Gateway formats (Fonnte, Wablas, Whacenter, Meta Cloud API, etc.)
+      // Extract sender and message text from various WA Gateway formats (Fonnte, Wablas, Whacenter, Meta Cloud API, Twilio, Baileys, etc.)
       const sender = body.sender || 
                      body.from || 
                      body.phone || 
                      body.wa_number || 
                      body.number || 
                      body.pushName || 
+                     body.author ||
+                     body.sender_number ||
                      (body.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.wa_id) || 
+                     (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from) ||
+                     (req.query?.sender || req.query?.from || req.query?.phone) ||
                      "WhatsApp User";
 
       const messageText = (
@@ -146,9 +180,11 @@ async function startServer() {
         body.payload || 
         body.pesan || 
         body.msg || 
+        body.content ||
         (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body) || 
         (body.data?.message) || 
         (typeof body === 'string' ? body : "") || 
+        (req.query?.message || req.query?.msg || req.query?.text) ||
         ""
       ).toString().trim();
 
@@ -160,12 +196,13 @@ async function startServer() {
           time: new Date().toLocaleTimeString("id-ID"),
           sender: String(sender),
           rawBody: body,
-          messageText: "(Pesan Kosong / Non-Teks)",
+          messageText: "(Payload Non-Teks / Ping / Acknowledgment)",
           status: "ignored",
-          actionTaken: "Pesan tidak berisi teks"
+          actionTaken: "Pesan tidak berisi format teks"
         };
         recentWebhooks.unshift(logItem);
-        return res.json({ status: "success", detail: "Pesan tidak berisi teks" });
+        saveWebhookLogs(recentWebhooks);
+        return res.json({ status: "success", detail: "Payload diterima tapi tidak berisi teks" });
       }
 
       const upperMsg = messageText.toUpperCase();
@@ -193,6 +230,7 @@ async function startServer() {
           actionTaken: `Update stok "${nama}" sebesar +${addedStock} berhasil diproses`
         };
         recentWebhooks.unshift(logItem);
+        saveWebhookLogs(recentWebhooks);
 
         return res.json({
           data: [
@@ -266,6 +304,7 @@ async function startServer() {
             actionTaken: `Data "${nama}" berhasil diproses via format Multiline. Total Stok: ${result.updatedStock}`,
           };
           recentWebhooks.unshift(logItem);
+          saveWebhookLogs(recentWebhooks);
 
           return res.json({
             data: [
@@ -321,8 +360,7 @@ async function startServer() {
           actionTaken: `Data "${nama}" berhasil disimpan. Total Stok: ${result.updatedStock}`,
         };
         recentWebhooks.unshift(logItem);
-
-        if (recentWebhooks.length > 50) recentWebhooks.pop();
+        saveWebhookLogs(recentWebhooks);
 
         return res.json({
           data: [
@@ -335,6 +373,10 @@ async function startServer() {
 
       // 4. Check for !stok command
       if (messageText.toLowerCase().startsWith("!stok") || messageText.toLowerCase().startsWith("!cekstok") || messageText.toLowerCase() === "stok" || messageText.toLowerCase() === "cek stok") {
+        const prods = getProductsBackend();
+        const top5 = prods.slice(0, 8).map(p => `• ${p.nama}: ${p.stok} ${p.satuan} (Rp ${p.hargaJual.toLocaleString('id-ID')})`).join('\n');
+        const replyMessage = `📦 *[POS TOKO SEMBAKO - INFO STOK]*\nTotal Produk Aktif: ${prods.length} item\n\n*Contoh Stok Barang:*\n${top5}\n\n_Ketik PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok untuk menambah produk._`;
+
         const logItem: WebhookLog = {
           id: Date.now().toString(),
           time: new Date().toLocaleTimeString("id-ID"),
@@ -345,10 +387,7 @@ async function startServer() {
           actionTaken: "Perintah cek stok diproses, membalas ringkasan stok toko"
         };
         recentWebhooks.unshift(logItem);
-
-        const prods = getProductsBackend();
-        const top5 = prods.slice(0, 8).map(p => `• ${p.nama}: ${p.stok} ${p.satuan} (Rp ${p.hargaJual.toLocaleString('id-ID')})`).join('\n');
-        const replyMessage = `📦 *[POS TOKO SEMBAKO - INFO STOK]*\nTotal Produk Aktif: ${prods.length} item\n\n*Contoh Stok Barang:*\n${top5}\n\n_Ketik PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok untuk menambah produk._`;
+        saveWebhookLogs(recentWebhooks);
 
         return res.json({
           data: [
@@ -359,7 +398,7 @@ async function startServer() {
         });
       }
 
-      // Generic help reply
+      // Generic reply and log
       const logItem: WebhookLog = {
         id: Date.now().toString(),
         time: new Date().toLocaleTimeString("id-ID"),
@@ -367,9 +406,10 @@ async function startServer() {
         rawBody: body,
         messageText,
         status: "ignored",
-        actionTaken: "Pesan tidak menggunakan format PRODUK# atau STOK#"
+        actionTaken: "Pesan tidak menggunakan format PRODUK# atau STOK# (Dibalas petunjuk format)"
       };
       recentWebhooks.unshift(logItem);
+      saveWebhookLogs(recentWebhooks);
 
       const defaultReply = "ℹ️ *[POS Toko Sembako Bot]*\n\nFormat input WhatsApp:\n\n1️⃣ *Tambah / Update Produk:*\n`PRODUK#Nama Barang#Kategori#Harga Beli#Harga Jual#Jumlah Stok#Satuan#Min Stok`\n_Contoh: PRODUK#Beras Rojolele 10kg#Sembako#120000#135000#25#Karung#5_\n\n2️⃣ *Tambah Stok Cepat:*\n`STOK#Nama Barang#Jumlah Tambahan`\n_Contoh: STOK#Beras Rojolele 10kg#10_\n\n3️⃣ *Cek Stok:*\nKetik `!stok`";
 
@@ -383,6 +423,18 @@ async function startServer() {
 
     } catch (err: any) {
       console.error("[WhatsApp Webhook Error]:", err);
+      const logItem: WebhookLog = {
+        id: Date.now().toString(),
+        time: new Date().toLocaleTimeString("id-ID"),
+        sender: "WhatsApp Webhook Handler",
+        rawBody: req.body,
+        messageText: "Error: " + (err?.message || "Unknown error"),
+        status: "error",
+        actionTaken: "Gagal memproses: " + (err?.message || "Internal error")
+      };
+      recentWebhooks.unshift(logItem);
+      saveWebhookLogs(recentWebhooks);
+
       return res.status(200).json({
         data: [
           {
@@ -392,7 +444,6 @@ async function startServer() {
       });
     }
   });
-
 
   // GET /api/whatsapp/logs - Fetch recent webhook logs & pending products for UI display
   app.get("/api/whatsapp/logs", (req, res) => {
@@ -408,6 +459,7 @@ async function startServer() {
   app.post("/api/whatsapp/clear-logs", (req, res) => {
     recentWebhooks.length = 0;
     pendingProducts.length = 0;
+    saveWebhookLogs(recentWebhooks);
     res.json({ status: "cleared" });
   });
 
@@ -499,84 +551,68 @@ async function startServer() {
     }
   });
 
-  // 7b. POST /api/auth/crm-login - Direct CRM Customer Login by Email & Password
-  app.post("/api/auth/crm-login", (req, res) => {
+  // 7b. Staff Endpoints (GET, POST, DELETE)
+  app.get("/api/staff", (req, res) => {
     try {
-      const { email, password } = req.body || {};
-      const cleanEmail = (email || '').trim().toLowerCase();
-      const cleanPassword = (password || '').trim();
-
-      if (!cleanEmail || !cleanPassword) {
-        return res.status(400).json({ success: false, message: "Email dan password wajib diisi." });
-      }
-
-      // Master Developer instant bypass
-      if (
-        cleanEmail === "developer@sembakosmart.id" ||
-        cleanEmail === "dev@sembakosmart.id" ||
-        cleanEmail === "superadmin@sembakosmart.id"
-      ) {
-        if (cleanPassword === "password123" || cleanPassword === "998877" || cleanPassword.length >= 4) {
-          return res.json({
-            success: true,
-            message: "Login Developer Berhasil",
-            user: {
-              id: "user-crm-dev",
-              email: "developer@sembakosmart.id",
-              namaPemilik: "Master Developer (Super Admin)",
-              namaToko: "Pusat Developer Sembako Smart AI",
-              noHp: "081234567899",
-              plan: "enterprise",
-              licenseKey: "SBK-DEV-MASTER-9988",
-              deviceLimit: 99,
-              role: "developer"
-            }
-          });
-        }
-      }
-
-      const users = getCrmUsersBackend();
-      const user = users.find(
-        (u) =>
-          u.email?.trim().toLowerCase() === cleanEmail &&
-          (u.password === cleanPassword || (!u.password && cleanPassword === "password123") || cleanPassword === "998877")
-      );
-
-      if (!user) {
-        return res.status(401).json({ success: false, message: "Email atau kata sandi tidak cocok." });
-      }
-
-      if (user.status === "suspended") {
-        return res.status(403).json({ success: false, message: "Akun toko Anda sedang dibekukan oleh Administrator. Hubungi WhatsApp Support." });
-      }
-
-      if (user.status === "expired" || (user.expiresAt && new Date(user.expiresAt).getTime() < Date.now())) {
-        return res.status(403).json({ success: false, message: "Masa aktif lisensi toko Anda telah berakhir. Silakan perpanjang lisensi." });
-      }
-
-      // Update last login
-      user.lastLoginAt = new Date().toISOString();
-      saveCrmUserBackend(user);
-
-      res.json({
-        success: true,
-        message: "Login berhasil",
-        user: {
-          id: user.id,
-          email: user.email,
-          namaPemilik: user.namaPemilik,
-          namaToko: user.namaToko,
-          noHp: user.noHp,
-          plan: user.plan,
-          licenseKey: user.licenseKey,
-          deviceLimit: user.deviceLimit,
-          role: user.role || "owner"
-        }
-      });
+      const staff = getStaffBackend();
+      res.json({ success: true, staff });
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }
   });
+
+  app.post("/api/staff", (req, res) => {
+    try {
+      const { staff } = req.body || {};
+      if (!staff || !staff.username) {
+        return res.status(400).json({ success: false, message: "Data staff tidak valid." });
+      }
+      const saved = saveStaffBackend(staff);
+      res.json({ success: true, staff: saved, message: "Staff account saved" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.delete("/api/staff/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const success = deleteStaffBackend(id);
+      res.json({ success, message: "Staff account deleted" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // 7c. POST /api/auth/crm-login & /api/auth/login - Master Unified Login
+  const handleUnifiedLogin = (req: express.Request, res: express.Response) => {
+    try {
+      const { email, username, identifier, password } = req.body || {};
+      const cleanId = (identifier || email || username || '').trim();
+      const cleanPass = (password || '').trim();
+
+      if (!cleanId || !cleanPass) {
+        return res.status(400).json({ success: false, message: "Email/Username dan password wajib diisi." });
+      }
+
+      const authResult = authenticateUserBackend(cleanId, cleanPass);
+      if (!authResult.success) {
+        return res.status(401).json({ success: false, message: authResult.message || "Email atau kata sandi tidak cocok." });
+      }
+
+      res.json({
+        success: true,
+        message: "Login berhasil",
+        role: authResult.role,
+        user: authResult.user
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  };
+
+  app.post("/api/auth/crm-login", handleUnifiedLogin);
+  app.post("/api/auth/login", handleUnifiedLogin);
 
   // 8. POST /api/developer/test-gemini - Live test Gemini API Key
   app.post("/api/developer/test-gemini", async (req, res) => {
@@ -754,4 +790,6 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+});

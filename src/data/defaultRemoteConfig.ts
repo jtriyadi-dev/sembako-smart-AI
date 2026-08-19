@@ -138,6 +138,27 @@ export const DEFAULT_REMOTE_CONFIG: RemoteAppConfig = {
 
 export const INITIAL_CRM_USERS: CrmUser[] = [
   {
+    id: 'user-crm-jtriyadi',
+    namaPemilik: 'J. Triyadi (Owner)',
+    namaToko: 'Toko Sembako Berkah Smart',
+    email: 'jtriyadi@gmail.com',
+    password: 'password123',
+    noHp: '081234567899',
+    alamatToko: 'Jl. Toko Sembako No. 88, Indonesia',
+    plan: 'pro_lifetime',
+    status: 'aktif',
+    licenseKey: 'SBK-PRO-7788-JT99',
+    deviceLimit: 10,
+    activeDevicesCount: 1,
+    role: 'owner',
+    notes: 'Akun Owner Toko Terverifikasi Lifetime - Akses Semua Perangkat',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: new Date().toISOString(),
+    expiresAt: null,
+    lastLoginAt: new Date().toISOString(),
+    totalTransactions: 100
+  },
+  {
     id: 'user-crm-dev',
     namaPemilik: 'Master Developer (Super Admin)',
     namaToko: 'Pusat Developer Sembako Smart AI',

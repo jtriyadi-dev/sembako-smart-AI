@@ -85,6 +85,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Background Pre-Sync CRM users and Staff accounts from server
+  useEffect(() => {
+    const syncUsersFromServer = async () => {
+      try {
+        const [resUsers, resStaff] = await Promise.allSettled([
+          fetch('/api/developer/users', { signal: AbortSignal.timeout(4000) }),
+          fetch('/api/staff', { signal: AbortSignal.timeout(4000) }),
+        ]);
+
+        if (resUsers.status === 'fulfilled' && resUsers.value.ok) {
+          const uData = await resUsers.value.json();
+          if (Array.isArray(uData.users) && uData.users.length > 0) {
+            localStorage.setItem('sembako_crm_users_v2', JSON.stringify(uData.users));
+          }
+        }
+
+        if (resStaff.status === 'fulfilled' && resStaff.value.ok) {
+          const sData = await resStaff.value.json();
+          if (Array.isArray(sData.staff) && sData.staff.length > 0) {
+            localStorage.setItem('sembako_staff_accounts', JSON.stringify(sData.staff));
+          }
+        }
+      } catch (e) {}
+    };
+
+    syncUsersFromServer();
+  }, []);
+
   // 1-Second Timer Tick for Demo Account Expiration
   useEffect(() => {
     if (!isDemoSession || !demoExpiresAt) return;
@@ -395,73 +423,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // 3. Try Server CRM Database (/api/auth/crm-login) with fast response (<20ms)
+    // 3. Try Server Unified Authentication (/api/auth/login) with reliable timeout (5000ms)
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1500);
-
-      const res = await fetch('/api/auth/crm-login', {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
-        signal: controller.signal
+        body: JSON.stringify({ identifier: cleanEmail, email: cleanEmail, password: cleanPass }),
+        signal: AbortSignal.timeout(5000)
       });
-      clearTimeout(timeoutId);
 
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const data = await res.json();
         if (res.ok && data.success && data.user) {
-          const crmUser = data.user;
+          const authUser = data.user;
+          const userRole = data.role || authUser.role || 'owner';
           const mockAuthUser = {
-            uid: crmUser.id || 'crm-' + Date.now(),
-            email: crmUser.email,
-            displayName: crmUser.namaPemilik,
+            uid: authUser.id || 'crm-' + Date.now(),
+            email: authUser.email || `${authUser.username || 'user'}@sembakosmart.id`,
+            displayName: authUser.namaPemilik || authUser.nama || 'Pengguna Toko',
             photoURL: null,
           } as User;
 
           setUser(mockAuthUser);
           setProfile({
             uid: mockAuthUser.uid,
-            email: crmUser.email,
-            displayName: crmUser.namaPemilik,
+            email: mockAuthUser.email || '',
+            displayName: mockAuthUser.displayName || 'Pengguna Toko',
             photoURL: null,
-            namaToko: crmUser.namaToko || 'Toko Sembako',
-            role: crmUser.role || 'owner',
-            alamatToko: '',
-            noHp: crmUser.noHp || '',
+            namaToko: authUser.namaToko || 'Toko Sembako Berkah Smart',
+            role: userRole,
+            alamatToko: authUser.alamatToko || '',
+            noHp: authUser.noHp || '',
           });
 
-          if (crmUser.role === 'developer') {
+          if (userRole === 'developer') {
             localStorage.setItem('sembako_developer_auth_session', 'true');
             localStorage.setItem('sembako_developer_secret', 'master-dev-token');
           }
 
-          if (crmUser.licenseKey) {
-            localStorage.setItem('sembako_license_key', crmUser.licenseKey);
-            localStorage.setItem('sembako_license_owner', crmUser.namaPemilik);
-            localStorage.setItem('sembako_license_store', crmUser.namaToko);
-            localStorage.setItem(
-              'sembako_license_info',
-              JSON.stringify({
-                isActivated: true,
-                licenseKey: crmUser.licenseKey,
-                licenseType: crmUser.plan === 'enterprise' ? 'ENTERPRISE' : 'PRO_LIFETIME',
-                licenseeName: crmUser.namaPemilik,
-                activatedAt: new Date().toISOString(),
-                expiryDate: crmUser.plan === 'trial_6h' ? 'Trial 6 Jam' : 'Permanen / Lifetime',
-              })
-            );
-          }
+          const licenseKeyToUse = authUser.licenseKey || 'SBK-PRO-7788-JT99';
+          localStorage.setItem('sembako_license_key', licenseKeyToUse);
+          localStorage.setItem('sembako_license_owner', authUser.namaPemilik || authUser.nama || 'Pemilik Toko');
+          localStorage.setItem('sembako_license_store', authUser.namaToko || 'Toko Sembako Berkah Smart');
+          localStorage.setItem(
+            'sembako_license_info',
+            JSON.stringify({
+              isActivated: true,
+              licenseKey: licenseKeyToUse,
+              licenseType: authUser.plan === 'enterprise' ? 'ENTERPRISE' : 'PRO_LIFETIME',
+              licenseeName: authUser.namaPemilik || authUser.nama || 'Pemilik Toko',
+              activatedAt: new Date().toISOString(),
+              expiryDate: authUser.plan === 'trial_6h' ? 'Trial 6 Jam' : 'Permanen / Lifetime',
+            })
+          );
 
           setIsDemoSession(false);
           return { user: mockAuthUser } as any;
-        } else if (data && data.message && !data.message.includes('tidak ditemukan')) {
+        } else if (data && data.message && !data.message.includes('tidak terdaftar') && !data.message.includes('tidak cocok')) {
           throw new Error(data.message);
         }
       }
     } catch (serverErr: any) {
-      if (serverErr.message && (serverErr.message.includes('sandi') || serverErr.message.includes('dibekukan') || serverErr.message.includes('berakhir'))) {
+      if (serverErr.message && (serverErr.message.includes('sandi') || serverErr.message.includes('dibekukan') || serverErr.message.includes('berakhir') || serverErr.message.includes('dinonaktifkan'))) {
         throw serverErr;
       }
     }

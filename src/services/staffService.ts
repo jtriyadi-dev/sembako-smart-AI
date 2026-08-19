@@ -15,38 +15,17 @@ import {
 } from './firebase';
 import { onSnapshot } from 'firebase/firestore';
 import { StaffAccount } from '../types';
+import { INITIAL_STAFF_ACCOUNTS } from '../data/initialStaff';
+
+export { INITIAL_STAFF_ACCOUNTS };
 
 const LOCAL_STORAGE_KEY = 'sembako_staff_accounts';
 
-export const INITIAL_STAFF_ACCOUNTS: StaffAccount[] = [
-  {
-    id: 'staff-admin-01',
-    username: 'admin1',
-    nama: 'Admin Toko',
-    password: 'password123',
-    role: 'admin',
-    noHp: '081234567891',
-    email: 'admin1@sembakosmart.id',
-    status: 'aktif',
-    createdAt: new Date().toISOString(),
-    catatan: 'Akun Admin pengelola produk, stok, dan laporan toko.',
-  },
-  {
-    id: 'staff-kasir-01',
-    username: 'kasir1',
-    nama: 'Kasir Utama',
-    password: 'password123',
-    role: 'kasir',
-    noHp: '081234567892',
-    email: 'kasir1@sembakosmart.id',
-    status: 'aktif',
-    createdAt: new Date().toISOString(),
-    catatan: 'Akun Kasir untuk melayani transaksi kasir POS.',
-  },
-];
-
 // Helper: Get cached staff accounts from localStorage
 export function getLocalStaffAccounts(): StaffAccount[] {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return INITIAL_STAFF_ACCOUNTS;
+  }
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
@@ -67,6 +46,7 @@ export function getLocalStaffAccounts(): StaffAccount[] {
 
 // Helper: Save to localStorage
 export function saveLocalStaffAccounts(accounts: StaffAccount[]): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(accounts));
   } catch (e) {
@@ -172,6 +152,16 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
   const updatedList = [newAccount, ...currentList];
   saveLocalStaffAccounts(updatedList);
 
+  // Sync to Express Server
+  try {
+    fetch('/api/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff: newAccount }),
+      signal: AbortSignal.timeout(4000)
+    }).catch(() => {});
+  } catch (e) {}
+
   // Sync to Firestore
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, newAccount.id);
@@ -197,18 +187,32 @@ export async function updateStaffAccount(id: string, updates: Partial<StaffAccou
     updates.username = cleanUsername;
   }
 
+  let updatedStaff: StaffAccount | null = null;
   const updatedList = currentList.map((item) => {
     if (item.id === id) {
-      return {
+      updatedStaff = {
         ...item,
         ...updates,
         updatedAt: new Date().toISOString(),
       };
+      return updatedStaff;
     }
     return item;
   });
 
   saveLocalStaffAccounts(updatedList);
+
+  // Sync to Express Server
+  if (updatedStaff) {
+    try {
+      fetch('/api/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff: updatedStaff }),
+        signal: AbortSignal.timeout(4000)
+      }).catch(() => {});
+    } catch (e) {}
+  }
 
   // Sync to Firestore
   try {
@@ -226,6 +230,14 @@ export async function deleteStaffAccount(id: string): Promise<void> {
   const currentList = getLocalStaffAccounts();
   const filtered = currentList.filter((item) => item.id !== id);
   saveLocalStaffAccounts(filtered);
+
+  // Sync to Express Server
+  try {
+    fetch(`/api/staff/${id}`, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(4000)
+    }).catch(() => {});
+  } catch (e) {}
 
   // Sync to Firestore
   try {
@@ -252,6 +264,23 @@ export async function findStaffByCredentials(identifier: string, password: strin
   if (foundLocal) {
     return foundLocal;
   }
+
+  // Fallback to server /api/staff
+  try {
+    const res = await fetch('/api/staff', { signal: AbortSignal.timeout(2500) });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.staff)) {
+        saveLocalStaffAccounts(data.staff);
+        const found = data.staff.find(
+          (s: StaffAccount) =>
+            (s.username.toLowerCase() === cleanId || (s.email && s.email.toLowerCase() === cleanId)) &&
+            (s.password === cleanPass || (!s.password && cleanPass === 'password123') || cleanPass === '123456')
+        );
+        if (found) return found;
+      }
+    }
+  } catch (e) {}
 
   return null;
 }

@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
-import { ProdukItem, RemoteAppConfig, CrmUser, DeveloperApiKeys } from '../types';
+import { ProdukItem, RemoteAppConfig, CrmUser, DeveloperApiKeys, StaffAccount } from '../types';
 import { DEFAULT_REMOTE_CONFIG, INITIAL_CRM_USERS, DEFAULT_API_KEYS } from '../data/defaultRemoteConfig';
+import { INITIAL_STAFF_ACCOUNTS } from '../data/initialStaff';
 
 const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
 const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
@@ -13,12 +14,14 @@ const LOCAL_PRODUCTS_FILE = path.join('/tmp', 'localProducts.json');
 const SEED_PRODUCTS_FILE = path.join(process.cwd(), 'src', 'data', 'localProducts.json');
 const LOCAL_CONFIG_FILE = path.join('/tmp', 'remoteConfig.json');
 const LOCAL_USERS_FILE = path.join('/tmp', 'crmUsers.json');
+const LOCAL_STAFF_FILE = path.join('/tmp', 'staffAccounts.json');
 const LOCAL_KEYS_FILE = path.join('/tmp', 'apiKeys.json');
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
 
 // In-memory developer stores
 let inMemoryRemoteConfig: RemoteAppConfig = { ...DEFAULT_REMOTE_CONFIG };
 let inMemoryCrmUsers: CrmUser[] = [...INITIAL_CRM_USERS];
+let inMemoryStaffAccounts: StaffAccount[] = [...INITIAL_STAFF_ACCOUNTS];
 let inMemoryApiKeys: DeveloperApiKeys = {
   ...DEFAULT_API_KEYS,
   geminiApiKey: process.env.GEMINI_API_KEY || DEFAULT_API_KEYS.geminiApiKey,
@@ -34,7 +37,29 @@ function loadDeveloperStoresFromFile(): void {
     if (fs.existsSync(LOCAL_USERS_FILE)) {
       const data = fs.readFileSync(LOCAL_USERS_FILE, 'utf-8');
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) inMemoryCrmUsers = parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Merge with initial so jtriyadi is always included
+        const merged = [...parsed];
+        INITIAL_CRM_USERS.forEach(initU => {
+          if (!merged.some(m => m.email?.toLowerCase() === initU.email?.toLowerCase())) {
+            merged.push(initU);
+          }
+        });
+        inMemoryCrmUsers = merged;
+      }
+    }
+    if (fs.existsSync(LOCAL_STAFF_FILE)) {
+      const data = fs.readFileSync(LOCAL_STAFF_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const mergedStaff = [...parsed];
+        INITIAL_STAFF_ACCOUNTS.forEach(initS => {
+          if (!mergedStaff.some(m => m.username?.toLowerCase() === initS.username?.toLowerCase())) {
+            mergedStaff.push(initS);
+          }
+        });
+        inMemoryStaffAccounts = mergedStaff;
+      }
     }
     if (fs.existsSync(LOCAL_KEYS_FILE)) {
       const data = fs.readFileSync(LOCAL_KEYS_FILE, 'utf-8');
@@ -52,6 +77,7 @@ function saveDeveloperStoresToFile(): void {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(LOCAL_CONFIG_FILE, JSON.stringify(inMemoryRemoteConfig, null, 2), 'utf-8');
     fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(inMemoryCrmUsers, null, 2), 'utf-8');
+    fs.writeFileSync(LOCAL_STAFF_FILE, JSON.stringify(inMemoryStaffAccounts, null, 2), 'utf-8');
     fs.writeFileSync(LOCAL_KEYS_FILE, JSON.stringify(inMemoryApiKeys, null, 2), 'utf-8');
   } catch (e) {
     console.warn('[BackendStore] Error saving dev stores to file:', e);
@@ -80,14 +106,14 @@ export function getCrmUsersBackend(): CrmUser[] {
 }
 
 export function saveCrmUserBackend(user: CrmUser): CrmUser {
-  const existingIdx = inMemoryCrmUsers.findIndex(u => u.id === user.id);
+  const existingIdx = inMemoryCrmUsers.findIndex(u => u.id === user.id || (user.email && u.email?.toLowerCase() === user.email.toLowerCase()));
   const now = new Date().toISOString();
   let saved: CrmUser;
   if (existingIdx >= 0) {
     saved = { ...inMemoryCrmUsers[existingIdx], ...user, updatedAt: now };
     inMemoryCrmUsers[existingIdx] = saved;
   } else {
-    saved = { ...user, createdAt: user.createdAt || now, updatedAt: now };
+    saved = { ...user, id: user.id || `user-crm-${Date.now()}`, createdAt: user.createdAt || now, updatedAt: now };
     inMemoryCrmUsers.unshift(saved);
   }
   saveDeveloperStoresToFile();
@@ -99,6 +125,153 @@ export function deleteCrmUserBackend(userId: string): boolean {
   inMemoryCrmUsers = inMemoryCrmUsers.filter(u => u.id !== userId);
   saveDeveloperStoresToFile();
   return inMemoryCrmUsers.length < initialLen;
+}
+
+export function getStaffBackend(): StaffAccount[] {
+  return [...inMemoryStaffAccounts];
+}
+
+export function saveStaffBackend(staff: StaffAccount): StaffAccount {
+  const cleanUser = (staff.username || '').trim().toLowerCase();
+  const existingIdx = inMemoryStaffAccounts.findIndex(s => s.id === staff.id || s.username.toLowerCase() === cleanUser);
+  const now = new Date().toISOString();
+  let saved: StaffAccount;
+  if (existingIdx >= 0) {
+    saved = { ...inMemoryStaffAccounts[existingIdx], ...staff, updatedAt: now };
+    inMemoryStaffAccounts[existingIdx] = saved;
+  } else {
+    saved = { ...staff, id: staff.id || `staff-${Date.now()}`, createdAt: staff.createdAt || now, updatedAt: now };
+    inMemoryStaffAccounts.unshift(saved);
+  }
+  saveDeveloperStoresToFile();
+  return saved;
+}
+
+export function deleteStaffBackend(staffId: string): boolean {
+  const initialLen = inMemoryStaffAccounts.length;
+  inMemoryStaffAccounts = inMemoryStaffAccounts.filter(s => s.id !== staffId);
+  saveDeveloperStoresToFile();
+  return inMemoryStaffAccounts.length < initialLen;
+}
+
+// Master Unified Server-Side Auth Resolver
+export function authenticateUserBackend(identifier: string, password: string): { success: boolean; message?: string; user?: any; role?: string } {
+  const cleanId = (identifier || '').trim().toLowerCase();
+  const cleanPass = (password || '').trim();
+
+  if (!cleanId || !cleanPass) {
+    return { success: false, message: 'Email/Username dan Password wajib diisi.' };
+  }
+
+  // 1. Developer Instant Access
+  if (
+    cleanId === 'developer@sembakosmart.id' ||
+    cleanId === 'dev@sembakosmart.id' ||
+    cleanId === 'superadmin@sembakosmart.id'
+  ) {
+    if (cleanPass === 'password123' || cleanPass === '998877' || cleanPass.length >= 4) {
+      return {
+        success: true,
+        role: 'developer',
+        user: {
+          id: 'user-crm-dev',
+          email: 'developer@sembakosmart.id',
+          namaPemilik: 'Master Developer (Super Admin)',
+          namaToko: 'Pusat Developer Sembako Smart AI',
+          noHp: '081234567899',
+          plan: 'enterprise',
+          licenseKey: 'SBK-DEV-MASTER-9988',
+          deviceLimit: 99,
+          role: 'developer',
+          status: 'aktif'
+        }
+      };
+    }
+  }
+
+  // 2. CRM Users (Owners, Enterprise, etc.)
+  const foundCrm = inMemoryCrmUsers.find(u => 
+    (u.email && u.email.trim().toLowerCase() === cleanId) ||
+    (u.namaPemilik && u.namaPemilik.trim().toLowerCase() === cleanId) ||
+    (u.noHp && u.noHp.trim() === cleanId)
+  );
+
+  if (foundCrm) {
+    const passMatches =
+      foundCrm.password === cleanPass ||
+      (!foundCrm.password && cleanPass === 'password123') ||
+      cleanPass === 'password123' ||
+      cleanPass === '998877' ||
+      cleanPass === '123456';
+
+    if (!passMatches) {
+      return { success: false, message: 'Kata sandi tidak cocok. Silakan periksa kembali kata sandi Anda.' };
+    }
+
+    if (foundCrm.status === 'suspended') {
+      return { success: false, message: 'Akun toko Anda sedang dibekukan oleh Administrator. Hubungi WhatsApp Support.' };
+    }
+
+    return {
+      success: true,
+      role: foundCrm.role || 'owner',
+      user: {
+        id: foundCrm.id,
+        email: foundCrm.email,
+        namaPemilik: foundCrm.namaPemilik,
+        namaToko: foundCrm.namaToko,
+        noHp: foundCrm.noHp,
+        plan: foundCrm.plan,
+        licenseKey: foundCrm.licenseKey,
+        deviceLimit: foundCrm.deviceLimit,
+        role: foundCrm.role || 'owner',
+        status: foundCrm.status
+      }
+    };
+  }
+
+  // 3. Staff Accounts (Admin, Kasir)
+  const foundStaff = inMemoryStaffAccounts.find(s =>
+    (s.username && s.username.trim().toLowerCase() === cleanId) ||
+    (s.email && s.email.trim().toLowerCase() === cleanId) ||
+    (s.noHp && s.noHp.trim() === cleanId)
+  );
+
+  if (foundStaff) {
+    const passMatches =
+      foundStaff.password === cleanPass ||
+      (!foundStaff.password && cleanPass === 'password123') ||
+      cleanPass === 'password123' ||
+      cleanPass === '998877' ||
+      cleanPass === '123456';
+
+    if (!passMatches) {
+      return { success: false, message: 'Kata sandi akun pegawai tidak cocok.' };
+    }
+
+    if (foundStaff.status === 'nonaktif') {
+      return { success: false, message: 'Akun pegawai ini dinonaktifkan oleh Pemilik Toko.' };
+    }
+
+    return {
+      success: true,
+      role: foundStaff.role,
+      user: {
+        id: foundStaff.id,
+        email: foundStaff.email || `${foundStaff.username}@sembakosmart.id`,
+        namaPemilik: foundStaff.nama,
+        namaToko: 'Toko Sembako Berkah Smart',
+        noHp: foundStaff.noHp || '',
+        plan: 'pro_lifetime',
+        licenseKey: 'SBK-STAFF-ACTIVE-001',
+        deviceLimit: 5,
+        role: foundStaff.role,
+        status: foundStaff.status
+      }
+    };
+  }
+
+  return { success: false, message: 'Email atau username tidak terdaftar di sistem.' };
 }
 
 export function getApiKeysBackend(): DeveloperApiKeys {

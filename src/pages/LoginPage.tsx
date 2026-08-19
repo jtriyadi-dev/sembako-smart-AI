@@ -71,6 +71,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleOwnerQuickLogin = async (ownerEmail: string, ownerName: string) => {
+    setEmail(ownerEmail);
+    setPassword('password123');
+    setSubmitting(true);
+    setAuthError(null);
+    try {
+      await login(ownerEmail, 'password123');
+      success('Selamat Datang Pemilik Toko', `Masuk sebagai ${ownerName}.`);
+      handlePostAuthNavigate();
+    } catch (err: any) {
+      setAuthError(err.message || 'Gagal login pemilik toko.');
+      error('Gagal Login', err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -292,6 +309,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               <p className="text-[10px] text-slate-400 text-center font-mono">
                 ⏱️ Akses demo aktif selama 6 jam. Setelah 6 jam, semua data di-reset kembali kosong/awal.
               </p>
+            </div>
+
+            {/* Quick Owner Login */}
+            <div className="pt-2">
+              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>👑 Masuk Akun Pemilik Toko (Owner):</span>
+                <span className="text-[10px] text-amber-500 font-mono">Lisensi Lifetime</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOwnerQuickLogin('jtriyadi@gmail.com', 'J. Triyadi (Owner)')}
+                className="w-full py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              >
+                <Store className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span>Masuk Cepat: Pemilik Toko (jtriyadi@gmail.com)</span>
+              </button>
             </div>
 
             {/* Quick Staff Login (Kasir & Admin) */}
