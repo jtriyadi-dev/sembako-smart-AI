@@ -246,7 +246,7 @@ export const INITIAL_CRM_USERS: CrmUser[] = [
 
 export const DEFAULT_API_KEYS: DeveloperApiKeys = {
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: 'gemini-3.7-flash',
   waGatewayProvider: 'fonnte',
   waApiKey: '',
   waSenderNumber: '081234567890',

@@ -327,7 +327,7 @@ export async function saveDeveloperApiKeys(
 
 export async function testGeminiApiKey(
   apiKey: string,
-  modelName: string = 'gemini-2.5-flash'
+  modelName: string = 'gemini-3.7-flash'
 ): Promise<{ success: boolean; message: string; model?: string }> {
   const cleanKey = (apiKey || '').trim();
   if (!cleanKey) {
@@ -337,12 +337,17 @@ export async function testGeminiApiKey(
     };
   }
 
+  let activeModel = modelName || 'gemini-3.7-flash';
+  if (activeModel === 'gemini-2.5-flash' || activeModel === 'gemini-1.5-flash' || activeModel === 'gemini-1.5-pro') {
+    activeModel = 'gemini-3.7-flash';
+  }
+
   // 1. Try server-side endpoint first
   try {
     const { ok, data } = await safeJsonFetch('/api/developer/test-gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey: cleanKey, model: modelName }),
+      body: JSON.stringify({ apiKey: cleanKey, model: activeModel }),
       signal: AbortSignal.timeout(8000)
     });
 
@@ -353,10 +358,10 @@ export async function testGeminiApiKey(
     // Proceed to direct client verification fallback
   }
 
-  // 2. Direct client-side Gemini verification fallback
-  try {
-    const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-    const directRes = await fetch(directUrl, {
+  // Helper for direct Google Gemini REST call
+  const callGoogleRest = async (model: string) => {
+    const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+    return await fetch(directUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -368,14 +373,25 @@ export async function testGeminiApiKey(
       }),
       signal: AbortSignal.timeout(10000)
     });
+  };
+
+  // 2. Direct client-side Gemini verification fallback
+  try {
+    let directRes = await callGoogleRest(activeModel);
+
+    // If 404 (model deprecated/unavailable), auto-fallback to gemini-3.6-flash or gemini-3.7-flash
+    if (directRes.status === 404 && activeModel !== 'gemini-3.6-flash') {
+      activeModel = 'gemini-3.6-flash';
+      directRes = await callGoogleRest(activeModel);
+    }
 
     if (directRes.ok) {
       const resultData = await directRes.json();
       const text = resultData.candidates?.[0]?.content?.parts?.[0]?.text || 'Terhubung';
       return {
         success: true,
-        message: `✅ Berhasil Terhubung ke Google Gemini AI (${modelName})! Respon: "${text.trim()}"`,
-        model: modelName
+        message: `✅ Berhasil Terhubung ke Google Gemini AI (${activeModel})! Respon: "${text.trim()}"`,
+        model: activeModel
       };
     } else {
       let errMsg = 'Invalid API Key atau Kuota Habis';

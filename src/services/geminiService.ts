@@ -314,14 +314,30 @@ export async function askGeminiAssistant(options: AiChatOptions): Promise<string
       },
     ];
 
-    const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
-    });
+    let response;
+    try {
+      response = await client.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
+      });
+    } catch (modelErr: any) {
+      if (modelErr?.message?.includes('404') || modelErr?.message?.includes('not found') || modelErr?.message?.includes('no longer available')) {
+        response = await client.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          },
+        });
+      } else {
+        throw modelErr;
+      }
+    }
 
     return response.text ?? 'Maaf, AI tidak dapat menghasilkan jawaban saat ini.';
   } catch (error: any) {

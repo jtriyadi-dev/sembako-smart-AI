@@ -447,14 +447,31 @@ async function startServer() {
       if (!keyToTest) {
         return res.status(400).json({ success: false, message: "API Key Gemini kosong. Harap masukkan API Key." });
       }
-      const modelToUse = model || 'gemini-2.5-flash';
+      let modelToUse = model || 'gemini-3.7-flash';
+      if (modelToUse === 'gemini-2.5-flash' || modelToUse === 'gemini-1.5-flash' || modelToUse === 'gemini-1.5-pro') {
+        modelToUse = 'gemini-3.7-flash';
+      }
       const ai = new GoogleGenAI({ apiKey: keyToTest });
-      const response = await ai.models.generateContent({
-        model: modelToUse,
-        contents: 'Balas singkat: "Koneksi Google Gemini API Berhasil Terhubung."'
-      });
-      const text = response.text || 'Koneksi Berhasil';
-      res.json({ success: true, message: `✅ Sukses: ${text.trim()}`, model: modelToUse });
+      try {
+        const response = await ai.models.generateContent({
+          model: modelToUse,
+          contents: 'Balas singkat: "Koneksi Google Gemini API Berhasil Terhubung."'
+        });
+        const text = response.text || 'Koneksi Berhasil';
+        return res.json({ success: true, message: `✅ Sukses: ${text.trim()}`, model: modelToUse });
+      } catch (innerErr: any) {
+        // Fallback to gemini-3.6-flash or gemini-3.7-flash if first model returned 404
+        if (innerErr?.message?.includes('404') || innerErr?.message?.includes('not found') || innerErr?.message?.includes('no longer available')) {
+          const fallbackModel = 'gemini-3.6-flash';
+          const fallbackResp = await ai.models.generateContent({
+            model: fallbackModel,
+            contents: 'Balas singkat: "Koneksi Google Gemini API Berhasil Terhubung."'
+          });
+          const text = fallbackResp.text || 'Koneksi Berhasil';
+          return res.json({ success: true, message: `✅ Sukses: ${text.trim()}`, model: fallbackModel });
+        }
+        throw innerErr;
+      }
     } catch (err: any) {
       console.warn('[Test Gemini Error]:', err?.message);
       res.json({ success: false, message: `❌ Gagal: ${err?.message || 'Invalid API Key atau Kuota Habis'}` });

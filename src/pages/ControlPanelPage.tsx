@@ -99,7 +99,11 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
 
   // API Keys Local Form State
   const [geminiKeyInput, setGeminiKeyInput] = useState(apiKeys.geminiApiKey || '');
-  const [geminiModelInput, setGeminiModelInput] = useState(apiKeys.geminiModel || 'gemini-2.5-flash');
+  const [geminiModelInput, setGeminiModelInput] = useState(
+    apiKeys.geminiModel && !['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'].includes(apiKeys.geminiModel)
+      ? apiKeys.geminiModel
+      : 'gemini-3.7-flash'
+  );
   const [waProviderInput, setWaProviderInput] = useState(apiKeys.waGatewayProvider || 'fonnte');
   const [waApiKeyInput, setWaApiKeyInput] = useState(apiKeys.waApiKey || '');
   const [waSenderInput, setWaSenderInput] = useState(apiKeys.waSenderNumber || '');
@@ -141,6 +145,11 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       loadUsersList();
       setCmsDraft(config);
       setGeminiKeyInput(apiKeys.geminiApiKey || '');
+      const validModel =
+        apiKeys.geminiModel && !['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'].includes(apiKeys.geminiModel)
+          ? apiKeys.geminiModel
+          : 'gemini-3.7-flash';
+      setGeminiModelInput(validModel);
       setWaApiKeyInput(apiKeys.waApiKey || '');
       setWaSenderInput(apiKeys.waSenderNumber || '');
       setWaProviderInput(apiKeys.waGatewayProvider || 'fonnte');
@@ -1711,9 +1720,10 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                     onChange={(e) => setGeminiModelInput(e.target.value)}
                     className="px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono"
                   >
-                    <option value="gemini-2.5-flash">gemini-2.5-flash (Direkomendasikan)</option>
-                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                    <option value="gemini-3.7-flash">gemini-3.7-flash (Terbaru & Direkomendasikan)</option>
+                    <option value="gemini-3.6-flash">gemini-3.6-flash (Cepat & Stabil)</option>
+                    <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Ultra Cepat)</option>
+                    <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Penalaran Kompleks)</option>
                   </select>
                 </div>
 
