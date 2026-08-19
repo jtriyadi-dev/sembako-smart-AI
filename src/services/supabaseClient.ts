@@ -47,6 +47,28 @@ export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): S
   }
 }
 
+function sanitizeSupabaseKey(raw: string): string {
+  if (!raw) return '';
+  let k = raw.trim();
+  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+    k = k.slice(1, -1).trim();
+  }
+  if (k.toLowerCase().startsWith('bearer ')) {
+    k = k.slice(7).trim();
+  }
+  return k;
+}
+
+function sanitizeSupabaseUrl(raw: string): string {
+  if (!raw) return '';
+  let u = raw.trim();
+  if ((u.startsWith('"') && u.endsWith('"')) || (u.startsWith("'") && u.endsWith("'"))) {
+    u = u.slice(1, -1).trim();
+  }
+  u = u.replace(/\/+$/, '');
+  return u;
+}
+
 /**
  * Test connectivity to Supabase instance
  */
@@ -54,8 +76,8 @@ export async function testSupabaseConnection(
   url: string,
   anonKey: string
 ): Promise<{ success: boolean; message: string; projectUrl?: string; tables?: string[] }> {
-  const cleanUrl = (url || '').trim();
-  const cleanKey = (anonKey || '').trim();
+  const cleanUrl = sanitizeSupabaseUrl(url);
+  const cleanKey = sanitizeSupabaseKey(anonKey);
 
   if (!cleanUrl || !cleanKey) {
     return {
@@ -73,50 +95,69 @@ export async function testSupabaseConnection(
   }
 
   try {
+    // 1. First test official Supabase Auth/GoTrue Settings endpoint (verifies API Key signature)
+    let authValid = false;
+    let authErrorDetail = '';
+    try {
+      const authSettingsRes = await fetch(`${cleanUrl}/auth/v1/settings`, {
+        method: 'GET',
+        headers: {
+          apikey: cleanKey,
+          Authorization: `Bearer ${cleanKey}`,
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (authSettingsRes.ok) {
+        authValid = true;
+      } else if (authSettingsRes.status === 401 || authSettingsRes.status === 403) {
+        const errJson = await authSettingsRes.json().catch(() => ({}));
+        authErrorDetail = errJson.message || errJson.msg || 'Invalid API Key';
+      }
+    } catch (_) {
+      // If network error on auth endpoint, proceed to client check
+    }
+
+    // 2. Test PostgREST table query with Supabase JS Client
     const tempClient = createClient(cleanUrl, cleanKey, {
       auth: { persistSession: false },
     });
 
-    // 1. Check REST endpoint connectivity
-    const pingRes = await fetch(`${cleanUrl}/rest/v1/`, {
-      headers: {
-        apikey: cleanKey,
-        Authorization: `Bearer ${cleanKey}`,
-      },
-      signal: AbortSignal.timeout(6000),
-    });
-
-    if (!pingRes.ok && pingRes.status === 401) {
-      return {
-        success: false,
-        message: 'Koneksi gagal (401 Unauthorized): Anon/Public Key tidak valid.',
-      };
-    }
-
-    // 2. Try querying products or version
-    const { error: queryErr } = await tempClient
+    const { data: prodData, error: queryErr } = await tempClient
       .from('products')
       .select('id')
       .limit(1);
 
-    if (queryErr && !queryErr.message.includes('relation "public.products" does not exist')) {
-      // If error is other than missing table (e.g. invalid key)
-      if (queryErr.code === 'PGRST301' || queryErr.message.includes('JWT')) {
-        return {
-          success: false,
-          message: `Koneksi ditolak: ${queryErr.message}`,
-        };
-      }
+    // If query succeeded or failed ONLY because table doesn't exist yet (42P01)
+    const isTableMissing = queryErr?.message?.toLowerCase().includes('does not exist') ||
+                           queryErr?.code === '42P01' ||
+                           queryErr?.code === 'PGRST204';
+
+    const isQueryAuthenticated = !queryErr || isTableMissing;
+
+    if (authValid || isQueryAuthenticated) {
+      const tableNotice = isTableMissing
+        ? ' (Tabel database belum dibuat, klik tombol "Skrip SQL Schema Supabase" untuk membuat tabel)'
+        : ' (Semua tabel siap & aktif)';
+
+      return {
+        success: true,
+        message: `✅ Berhasil Terhubung ke Supabase Cloud Database!${tableNotice}`,
+        projectUrl: cleanUrl,
+      };
     }
 
-    const tableNotice = queryErr?.message.includes('does not exist')
-      ? ' (Tabel belum dibuat, klik "Salin Skrip SQL" untuk membuat skema otomatis)'
-      : ' (Tabel siap & aktif)';
+    // If genuinely unauthorized
+    if (queryErr?.code === 'PGRST301' || queryErr?.message?.includes('JWT') || authErrorDetail) {
+      return {
+        success: false,
+        message: `❌ Kunci API Tidak Valid (${authErrorDetail || queryErr?.message}). Pastikan menyalin "anon public" key dari Supabase > Project Settings > API.`,
+      };
+    }
 
     return {
-      success: true,
-      message: `✅ Berhasil Terhubung ke Supabase Cloud Database!${tableNotice}`,
-      projectUrl: cleanUrl,
+      success: false,
+      message: `❌ Gagal verifikasi: ${queryErr?.message || authErrorDetail || 'Koneksi ditolak'}`,
     };
   } catch (err: any) {
     return {

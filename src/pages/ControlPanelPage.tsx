@@ -326,10 +326,29 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const handleTestSupabase = async () => {
     setTestingSupabase(true);
     setSupabaseTestResult(null);
+
+    // Auto-clean inputs
+    let cleanUrl = (supabaseUrlInput || '').trim();
+    if ((cleanUrl.startsWith('"') && cleanUrl.endsWith('"')) || (cleanUrl.startsWith("'") && cleanUrl.endsWith("'"))) {
+      cleanUrl = cleanUrl.slice(1, -1).trim();
+    }
+    cleanUrl = cleanUrl.replace(/\/+$/, '');
+
+    let cleanKey = (supabaseAnonKeyInput || '').trim();
+    if ((cleanKey.startsWith('"') && cleanKey.endsWith('"')) || (cleanKey.startsWith("'") && cleanKey.endsWith("'"))) {
+      cleanKey = cleanKey.slice(1, -1).trim();
+    }
+    if (cleanKey.toLowerCase().startsWith('bearer ')) {
+      cleanKey = cleanKey.slice(7).trim();
+    }
+
+    setSupabaseUrlInput(cleanUrl);
+    setSupabaseAnonKeyInput(cleanKey);
+
     try {
       const res = await testSupabaseGateway({
-        supabaseUrl: supabaseUrlInput,
-        supabaseAnonKey: supabaseAnonKeyInput,
+        supabaseUrl: cleanUrl,
+        supabaseAnonKey: cleanKey,
       });
       setSupabaseTestResult(res);
       if (res.success) {
@@ -346,16 +365,30 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
 
   // Handle Save API Keys
   const handleSaveApiKeys = async () => {
+    let cleanUrl = (supabaseUrlInput || '').trim();
+    if ((cleanUrl.startsWith('"') && cleanUrl.endsWith('"')) || (cleanUrl.startsWith("'") && cleanUrl.endsWith("'"))) {
+      cleanUrl = cleanUrl.slice(1, -1).trim();
+    }
+    cleanUrl = cleanUrl.replace(/\/+$/, '');
+
+    let cleanKey = (supabaseAnonKeyInput || '').trim();
+    if ((cleanKey.startsWith('"') && cleanKey.endsWith('"')) || (cleanKey.startsWith("'") && cleanKey.endsWith("'"))) {
+      cleanKey = cleanKey.slice(1, -1).trim();
+    }
+    if (cleanKey.toLowerCase().startsWith('bearer ')) {
+      cleanKey = cleanKey.slice(7).trim();
+    }
+
     try {
       const ok = await updateApiKeys({
-        geminiApiKey: geminiKeyInput,
+        geminiApiKey: (geminiKeyInput || '').trim(),
         geminiModel: geminiModelInput,
         waGatewayProvider: waProviderInput as any,
-        waApiKey: waApiKeyInput,
-        waSenderNumber: waSenderInput,
-        supabaseUrl: supabaseUrlInput,
-        supabaseAnonKey: supabaseAnonKeyInput,
-        supabaseServiceRoleKey: supabaseServiceRoleKeyInput,
+        waApiKey: (waApiKeyInput || '').trim(),
+        waSenderNumber: (waSenderInput || '').trim(),
+        supabaseUrl: cleanUrl,
+        supabaseAnonKey: cleanKey,
+        supabaseServiceRoleKey: (supabaseServiceRoleKeyInput || '').trim(),
       });
       if (ok) {
         success('Konfigurasi API & Database Disimpan', 'Kredensial Supabase, AI, dan WhatsApp Gateway berhasil diperbarui!');
@@ -2041,6 +2074,9 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                     {showSupabaseKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  🔑 Salin dari: <strong>Project Settings &gt; API &gt; API Keys &gt; anon public</strong> (diawali <code>eyJ...</code>).
+                </p>
               </div>
 
               <div>
@@ -2063,6 +2099,9 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                     {showSupabaseServiceKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  🔒 Salin dari: <strong>Project Settings &gt; API &gt; API Keys &gt; service_role</strong>.
+                </p>
               </div>
             </div>
 

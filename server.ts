@@ -526,8 +526,22 @@ async function startServer() {
     res.setHeader("Content-Type", "application/json");
     try {
       const { supabaseUrl, supabaseKey } = req.body || {};
-      const url = (supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
-      const key = (supabaseKey || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+      let url = (supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+      let key = (supabaseKey || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+
+      // Sanitize URL
+      if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
+        url = url.slice(1, -1).trim();
+      }
+      url = url.replace(/\/+$/, '');
+
+      // Sanitize Key
+      if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+        key = key.slice(1, -1).trim();
+      }
+      if (key.toLowerCase().startsWith('bearer ')) {
+        key = key.slice(7).trim();
+      }
 
       if (!url || !key) {
         return res.status(400).json({
@@ -536,34 +550,61 @@ async function startServer() {
         });
       }
 
-      if (!url.startsWith("https://")) {
+      if (!url.startsWith("https://") || !url.includes(".supabase.co")) {
         return res.status(400).json({
           success: false,
-          message: "Format URL Supabase tidak valid. URL harus diawali dengan https://"
+          message: "Format URL Supabase tidak valid. Contoh yang benar: https://abcdefghijklmn.supabase.co"
         });
       }
 
-      // Test ping to Supabase REST endpoint
-      const pingUrl = `${url.replace(/\/$/, '')}/rest/v1/`;
-      const pingResp = await fetch(pingUrl, {
+      // Check official Supabase Auth Settings endpoint (tests API Key validity)
+      const authUrl = `${url}/auth/v1/settings`;
+      let authPassed = false;
+      let authDetail = '';
+
+      try {
+        const authResp = await fetch(authUrl, {
+          method: "GET",
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`
+          },
+          signal: AbortSignal.timeout(6000)
+        });
+
+        if (authResp.ok) {
+          authPassed = true;
+        } else if (authResp.status === 401 || authResp.status === 403) {
+          const authData = await authResp.json().catch(() => ({}));
+          authDetail = authData.message || authData.msg || "Invalid API Key";
+        }
+      } catch (authErr: any) {
+        // Fallback to table query if auth endpoint had transient network issue
+      }
+
+      // Also verify REST PostgREST endpoint
+      const restResp = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
         method: "GET",
         headers: {
           apikey: key,
           Authorization: `Bearer ${key}`
-        }
-      });
+        },
+        signal: AbortSignal.timeout(6000)
+      }).catch(() => null);
 
-      if (!pingResp.ok && pingResp.status === 401) {
+      const isRestAuth = restResp && (restResp.ok || restResp.status === 404 || restResp.status === 400);
+
+      if (authPassed || isRestAuth) {
         return res.json({
-          success: false,
-          message: "Koneksi Supabase Ditolak (401 Unauthorized): Anon/Public Key tidak valid. Periksa kembali API Key dari Project Settings > API di Supabase."
+          success: true,
+          message: `✅ Berhasil Terhubung ke Supabase Cloud Database! Backend & PostgreSQL REST API Siap Digunakan.`,
+          url
         });
       }
 
       return res.json({
-        success: true,
-        message: `✅ Berhasil Terhubung ke Supabase Cloud Database! Backend & PostgreSQL REST API Siap Digunakan.`,
-        url
+        success: false,
+        message: `❌ Kunci API Tidak Valid (${authDetail || '401 Unauthorized'}). Pastikan menyalin 'anon public' key dari Supabase > Project Settings > API.`
       });
     } catch (err: any) {
       console.warn("[Test Supabase Error]:", err?.message);
