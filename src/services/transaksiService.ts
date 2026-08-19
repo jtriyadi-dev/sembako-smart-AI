@@ -15,64 +15,170 @@ import { TransaksiItem, TransaksiDetailItem, RiwayatReturItem } from '../types';
 import { handleFirestoreError, OperationType } from './productService';
 import { getSupabaseClient } from './supabaseClient';
 
-// Subscribe to Realtime Transactions
-export function subscribeTransactions(
-  onData: (transactions: TransaksiItem[]) => void,
-  onError?: (error: Error) => void
-) {
-  const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
-  const q = query(txRef);
+const CACHE_TX_KEY = 'sembako_cached_transactions';
 
-  const unsubscribe = onSnapshot(
-    q,
-    (snapshot) => {
-      const txs: TransaksiItem[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          kodeTransaksi: data.kodeTransaksi || `TRX-${docSnap.id.substring(0, 6).toUpperCase()}`,
-          tanggal: data.tanggal || new Date().toISOString(),
-          items: Array.isArray(data.items)
-            ? data.items.map((i: any) => ({
+export async function fetchTransactionsDirect(): Promise<TransaksiItem[]> {
+  // 1. Try direct Supabase fetch
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('tanggal', { ascending: false });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const txs: TransaksiItem[] = data.map((r: any) => ({
+          id: String(r.id),
+          kodeTransaksi: r.kode_transaksi || `TRX-${String(r.id).substring(0, 6).toUpperCase()}`,
+          tanggal: r.tanggal || r.created_at || new Date().toISOString(),
+          items: Array.isArray(r.items)
+            ? r.items.map((i: any) => ({
                 ...i,
                 returQty: Number(i.returQty) || 0,
                 alasanReturItem: i.alasanReturItem || '',
                 returAtItem: i.returAtItem || '',
               }))
             : [],
-          subtotal: Number(data.subtotal) || 0,
-          diskonTotal: Number(data.diskonTotal) || 0,
-          pajakPersen: Number(data.pajakPersen) || 0,
-          pajakNominal: Number(data.pajakNominal) || 0,
-          totalHarga: Number(data.totalHarga) || 0,
-          totalRefund: Number(data.totalRefund) || 0,
-          bayar: Number(data.bayar) || 0,
-          kembalian: Number(data.kembalian) || 0,
-          metodePembayaran: data.metodePembayaran || 'tunai',
-          statusPembayaran: data.statusPembayaran || 'lunas',
-          bankNama: data.bankNama || '',
-          noReferensi: data.noReferensi || '',
-          namaPelanggan: data.namaPelanggan || 'Pelanggan Umum',
-          kasirName: data.kasirName || 'Kasir Toko',
-          catatan: data.catatan || '',
-          alasanRetur: data.alasanRetur || '',
-          returAt: data.returAt || '',
-          riwayatRetur: Array.isArray(data.riwayatRetur) ? data.riwayatRetur : [],
-          createdAt: data.createdAt || new Date().toISOString(),
-        };
-      });
-
-      txs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      onData(txs);
-    },
-    (err) => {
-      console.error('Transactions subscription error:', err);
-      if (onError) onError(err);
-      onData([]);
+          subtotal: Number(r.subtotal) || 0,
+          diskonTotal: Number(r.diskon_total) || 0,
+          pajakPersen: Number(r.pajak_persen) || 0,
+          pajakNominal: Number(r.pajak_nominal) || 0,
+          totalHarga: Number(r.total_harga) || 0,
+          totalRefund: Number(r.total_refund) || 0,
+          bayar: Number(r.bayar) || 0,
+          kembalian: Number(r.kembalian) || 0,
+          metodePembayaran: r.metode_pembayaran || 'tunai',
+          statusPembayaran: r.status_pembayaran || 'lunas',
+          bankNama: r.bank_nama || '',
+          noReferensi: r.no_referensi || '',
+          namaPelanggan: r.nama_pelanggan || 'Pelanggan Umum',
+          kasirName: r.kasir_nama || 'Kasir Toko',
+          catatan: r.catatan || '',
+          alasanRetur: r.alasan_retur || '',
+          returAt: r.retur_at || '',
+          riwayatRetur: Array.isArray(r.riwayat_retur) ? r.riwayat_retur : [],
+          createdAt: r.created_at || new Date().toISOString(),
+        }));
+        try {
+          localStorage.setItem(CACHE_TX_KEY, JSON.stringify(txs));
+        } catch (e) {}
+        return txs;
+      }
+    } catch (sbErr) {
+      console.warn('[Supabase Transactions Fetch Error]:', sbErr);
     }
-  );
+  }
 
-  return unsubscribe;
+  // 2. Fallback to localStorage cache
+  try {
+    const cached = localStorage.getItem(CACHE_TX_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+
+  return [];
+}
+
+// Subscribe to Realtime Transactions with instant Supabase loading
+export function subscribeTransactions(
+  onData: (transactions: TransaksiItem[]) => void,
+  onError?: (error: Error) => void
+) {
+  let isUnsubscribed = false;
+
+  // 1. Instant Cache Call (<20ms)
+  try {
+    const cached = localStorage.getItem(CACHE_TX_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        onData(parsed);
+      }
+    }
+  } catch (e) {}
+
+  // 2. Fast Async Supabase Fetch
+  fetchTransactionsDirect().then((items) => {
+    if (!isUnsubscribed && items.length > 0) {
+      onData(items);
+    }
+  });
+
+  // 3. 3s Polling against Supabase
+  const pollInterval = setInterval(async () => {
+    if (isUnsubscribed) return;
+    const items = await fetchTransactionsDirect();
+    if (!isUnsubscribed && items.length > 0) {
+      onData(items);
+    }
+  }, 3000);
+
+  // 4. Background Firestore listener (non-blocking)
+  let unsubscribeFirestore = () => {};
+  try {
+    const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
+    const q = query(txRef);
+    unsubscribeFirestore = onSnapshot(
+      q,
+      (snapshot) => {
+        if (isUnsubscribed || snapshot.empty) return;
+        const txs: TransaksiItem[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            kodeTransaksi: data.kodeTransaksi || `TRX-${docSnap.id.substring(0, 6).toUpperCase()}`,
+            tanggal: data.tanggal || new Date().toISOString(),
+            items: Array.isArray(data.items)
+              ? data.items.map((i: any) => ({
+                  ...i,
+                  returQty: Number(i.returQty) || 0,
+                  alasanReturItem: i.alasanReturItem || '',
+                  returAtItem: i.returAtItem || '',
+                }))
+              : [],
+            subtotal: Number(data.subtotal) || 0,
+            diskonTotal: Number(data.diskonTotal) || 0,
+            pajakPersen: Number(data.pajakPersen) || 0,
+            pajakNominal: Number(data.pajakNominal) || 0,
+            totalHarga: Number(data.totalHarga) || 0,
+            totalRefund: Number(data.totalRefund) || 0,
+            bayar: Number(data.bayar) || 0,
+            kembalian: Number(data.kembalian) || 0,
+            metodePembayaran: data.metodePembayaran || 'tunai',
+            statusPembayaran: data.statusPembayaran || 'lunas',
+            bankNama: data.bankNama || '',
+            noReferensi: data.noReferensi || '',
+            namaPelanggan: data.namaPelanggan || 'Pelanggan Umum',
+            kasirName: data.kasirName || 'Kasir Toko',
+            catatan: data.catatan || '',
+            alasanRetur: data.alasanRetur || '',
+            returAt: data.returAt || '',
+            riwayatRetur: Array.isArray(data.riwayatRetur) ? data.riwayatRetur : [],
+            createdAt: data.createdAt || new Date().toISOString(),
+          };
+        });
+
+        txs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onData(txs);
+      },
+      (err) => {
+        console.warn('Firestore optional transaction listener:', err);
+      }
+    );
+  } catch (e) {}
+
+  return () => {
+    isUnsubscribed = true;
+    clearInterval(pollInterval);
+    try {
+      unsubscribeFirestore();
+    } catch (e) {}
+  };
 }
 
 // Generate unique transaction code: TRX-YYYYMMDD-XXXX

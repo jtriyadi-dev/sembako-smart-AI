@@ -221,7 +221,19 @@ export function subscribeProducts(
   let isUnsubscribed = false;
   let hasRestData = false;
 
-  // 1. Instant Direct Fetch (<200ms)
+  // 1. Instant Synchronous Cache Call (<10ms)
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        hasRestData = true;
+        onData(parsed.map(sanitizeProduct));
+      }
+    }
+  } catch (e) {}
+
+  // 2. Instant Supabase / REST Direct Fetch (<100ms)
   fetchProductsDirectRest().then((restProducts) => {
     if (!isUnsubscribed && restProducts.length > 0) {
       hasRestData = true;
@@ -229,7 +241,7 @@ export function subscribeProducts(
     }
   });
 
-  // 2. High-speed 2.5s Polling (Ensures stock changes via WhatsApp Webhook show immediately)
+  // 3. High-speed 2.5s Polling (Ensures stock changes via WhatsApp Webhook show immediately)
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     const items = await fetchProductsDirectRest();
@@ -239,65 +251,67 @@ export function subscribeProducts(
     }
   }, 2500);
 
-  // 3. Firestore JS SDK Realtime Listener
-  const productsRef = collection(db, COLLECTIONS.PRODUCTS);
-  const q = query(productsRef);
+  // 4. Firestore JS SDK Realtime Listener (non-blocking fallback)
+  let unsubscribeSnap = () => {};
+  try {
+    const productsRef = collection(db, COLLECTIONS.PRODUCTS);
+    const q = query(productsRef);
 
-  const unsubscribeSnap = onSnapshot(
-    q,
-    async (snapshot) => {
-      if (isUnsubscribed) return;
-      if (snapshot.empty) {
-        // If snapshot is empty but REST had items, keep REST items! Do NOT overwrite with static demo products
-        if (hasRestData) return;
-
-        const isDemo = Boolean(localStorage.getItem('sembako_demo_session'));
-        if (isDemo) {
-          const demoProducts: ProdukItem[] = INITIAL_PRODUCTS.map((item, idx) => ({
-            ...item,
-            id: `demo-prod-${idx + 1}`,
-          }));
-          onData(demoProducts);
+    unsubscribeSnap = onSnapshot(
+      q,
+      async (snapshot) => {
+        if (isUnsubscribed) return;
+        if (snapshot.empty) {
+          if (hasRestData) return;
+          const isDemo = Boolean(localStorage.getItem('sembako_demo_session'));
+          if (isDemo) {
+            const demoProducts: ProdukItem[] = INITIAL_PRODUCTS.map((item, idx) => ({
+              ...item,
+              id: `demo-prod-${idx + 1}`,
+            }));
+            onData(demoProducts);
+          }
+          return;
         }
-        return;
+
+        const products: ProdukItem[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            kode: data.kode || `SKU-${docSnap.id.substring(0, 5).toUpperCase()}`,
+            barcode: data.barcode || '',
+            nama: data.nama || 'Produk Sembako',
+            kategori: data.kategori || 'Lainnya',
+            hargaBeli: Number(data.hargaBeli) || 0,
+            hargaJual: Number(data.hargaJual) || 0,
+            stok: Number(data.stok) || 0,
+            minStok: Number(data.minStok) || 5,
+            satuan: data.satuan || 'Pcs',
+            gambarUrl: data.gambarUrl || '',
+            deskripsi: data.deskripsi || '',
+            expiredDate: data.expiredDate || '',
+            batchNo: data.batchNo || '',
+            terjual: Number(data.terjual) || 0,
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          };
+        });
+
+        hasRestData = true;
+        onData(products);
+      },
+      (err) => {
+        console.warn('Firestore optional product subscription error:', err);
       }
-
-      const products: ProdukItem[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          kode: data.kode || `SKU-${docSnap.id.substring(0, 5).toUpperCase()}`,
-          barcode: data.barcode || '',
-          nama: data.nama || 'Produk Sembako',
-          kategori: data.kategori || 'Lainnya',
-          hargaBeli: Number(data.hargaBeli) || 0,
-          hargaJual: Number(data.hargaJual) || 0,
-          stok: Number(data.stok) || 0,
-          minStok: Number(data.minStok) || 5,
-          satuan: data.satuan || 'Pcs',
-          gambarUrl: data.gambarUrl || '',
-          deskripsi: data.deskripsi || '',
-          expiredDate: data.expiredDate || '',
-          batchNo: data.batchNo || '',
-          terjual: Number(data.terjual) || 0,
-          createdAt: data.createdAt || new Date().toISOString(),
-          updatedAt: data.updatedAt || new Date().toISOString(),
-        };
-      });
-
-      hasRestData = true;
-      onData(products);
-    },
-    (err) => {
-      console.error('Product snapshot subscription error:', err);
-      if (onError) onError(err);
-    }
-  );
+    );
+  } catch (e) {}
 
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
-    unsubscribeSnap();
+    try {
+      unsubscribeSnap();
+    } catch (e) {}
   };
 }
 

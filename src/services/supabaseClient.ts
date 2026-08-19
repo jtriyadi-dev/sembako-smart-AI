@@ -267,12 +267,60 @@ CREATE TABLE IF NOT EXISTS public.remote_config (
   updated_by TEXT DEFAULT 'Super Admin'
 );
 
+-- 7. TABLE: SUPPLIERS (Data Pemasok & Distributor Sembako)
+CREATE TABLE IF NOT EXISTS public.suppliers (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  kode_supplier TEXT NOT NULL UNIQUE,
+  nama_supplier TEXT NOT NULL,
+  kontak_person TEXT,
+  telepon TEXT,
+  email TEXT,
+  alamat TEXT,
+  kategori_produk TEXT DEFAULT 'Umum',
+  catatan TEXT,
+  status TEXT NOT NULL DEFAULT 'aktif',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 8. TABLE: STOCK_MOVEMENTS (Riwayat Mutasi Stok Masuk, Keluar, Penyesuaian)
+CREATE TABLE IF NOT EXISTS public.stock_movements (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  produk_id TEXT NOT NULL,
+  nama_produk TEXT NOT NULL,
+  kode_produk TEXT,
+  tipe TEXT NOT NULL DEFAULT 'masuk',
+  jumlah NUMERIC(12,2) NOT NULL DEFAULT 0,
+  stok_awal NUMERIC(12,2) NOT NULL DEFAULT 0,
+  stok_akhir NUMERIC(12,2) NOT NULL DEFAULT 0,
+  keterangan TEXT,
+  supplier TEXT,
+  expired_date TEXT,
+  batch_no TEXT,
+  operator TEXT DEFAULT 'Admin Toko',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 9. TABLE: STOCK_OPNAMES (Audit Fisik Stok Toko)
+CREATE TABLE IF NOT EXISTS public.stock_opnames (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  tanggal DATE NOT NULL DEFAULT CURRENT_DATE,
+  keterangan TEXT,
+  operator TEXT DEFAULT 'Admin Toko',
+  total_selisih_nominal NUMERIC(15,2) NOT NULL DEFAULT 0,
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Enable Row Level Security (RLS) & Public Access Policies for API
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.crm_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.remote_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_opnames ENABLE ROW LEVEL SECURITY;
 
 -- Allow anon read & write with API key
 DO $$
@@ -291,6 +339,15 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Remote Config') THEN
     CREATE POLICY "Public Access Remote Config" ON public.remote_config FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Suppliers') THEN
+    CREATE POLICY "Public Access Suppliers" ON public.suppliers FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Stock Movements') THEN
+    CREATE POLICY "Public Access Stock Movements" ON public.stock_movements FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Stock Opnames') THEN
+    CREATE POLICY "Public Access Stock Opnames" ON public.stock_opnames FOR ALL USING (true) WITH CHECK (true);
   END IF;
 END $$;
 `;
