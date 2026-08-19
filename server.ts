@@ -86,6 +86,27 @@ async function startServer() {
     });
   });
 
+  // GET /api/whatsapp/webhook - Webhook Verification / Ping Check
+  app.get("/api/whatsapp/webhook", (req, res) => {
+    // Support Meta hub.challenge verification if provided
+    const hubChallenge = req.query['hub.challenge'] || req.query['challenge'];
+    if (hubChallenge) {
+      return res.send(String(hubChallenge));
+    }
+    res.json({
+      status: "active",
+      service: "Sembako Smart AI WhatsApp Webhook Listener",
+      endpoint: "/api/whatsapp/webhook",
+      method: "POST",
+      instructions: "Kirim payload pesan WhatsApp via POST dengan format JSON atau FormData ke URL ini.",
+      supportedCommands: [
+        "PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok",
+        "STOK#NamaProduk#JumlahTambah",
+        "!stok (Cek Ringkasan Stok Toko)"
+      ]
+    });
+  });
+
   // POST /api/whatsapp/webhook - Primary Webhook Listener
   app.post("/api/whatsapp/webhook", async (req, res) => {
     try {

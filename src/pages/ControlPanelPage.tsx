@@ -126,6 +126,51 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   // Webhook Logs
   const [logs, setLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [sendingDummyWebhook, setSendingDummyWebhook] = useState(false);
+
+  const fetchWebhookLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const res = await fetch('/api/whatsapp/logs');
+      const data = await res.json();
+      setLogs(data.logs || []);
+    } catch (e) {
+      console.warn('Failed to load webhook logs:', e);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  const handleSendDummyWebhook = async (commandType: 'product' | 'stock' | 'check') => {
+    setSendingDummyWebhook(true);
+    let sampleMsg = '';
+    if (commandType === 'product') {
+      sampleMsg = 'PRODUK#Beras Rojolele Super 5kg#Sembako & Bumbu#68000#75000#30#Sak#5';
+    } else if (commandType === 'stock') {
+      sampleMsg = 'STOK#Beras Rojolele Super 5kg#15';
+    } else {
+      sampleMsg = '!stok';
+    }
+
+    try {
+      const res = await fetch('/api/whatsapp/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: '6281234567890',
+          message: sampleMsg,
+          pushName: 'Admin Toko (Uji)'
+        })
+      });
+      const data = await res.json();
+      await fetchWebhookLogs();
+      success('Simulasi Webhook Berhasil', `Pesan "${sampleMsg}" berhasil diterima dan diproses server.`);
+    } catch (e: any) {
+      warning('Simulasi Webhook Gagal', e?.message || 'Gagal mengirim pesan');
+    } finally {
+      setSendingDummyWebhook(false);
+    }
+  };
 
   // Load CRM Users when dev is authenticated
   const loadUsersList = async () => {
@@ -1822,6 +1867,42 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                   </button>
                 </div>
               </div>
+
+              {/* Webhook URL Display & Copy */}
+              <div className="md:col-span-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
+                    Link / URL Webhook WhatsApp (Untuk Bot & Auto-Stok)
+                  </label>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20">
+                    🟢 Endpoint Aktif
+                  </span>
+                </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : 'https://your-domain.com/api/whatsapp/webhook'}
+                    className="w-full px-3.5 py-2.5 text-xs bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-emerald-600 dark:text-emerald-400 font-mono select-all font-bold tracking-wide"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : '/api/whatsapp/webhook';
+                      navigator.clipboard.writeText(url);
+                      success('Link Webhook Disalin', 'URL Webhook WhatsApp berhasil disalin ke clipboard!');
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shrink-0 cursor-pointer shadow-md shadow-emerald-900/20"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin Link Webhook
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                  💡 <strong>Cara Pasang:</strong> Masuk ke dashboard penyedia (<strong>Wablas / Fonnte / WhaCenter</strong>), buka menu <strong>Webhook</strong>, lalu tempel (<em>paste</em>) tautan di atas agar notifikasi dan bot otomatis aktif.
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center justify-between pt-2">
@@ -1867,46 +1948,163 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       {/* TAB 5: WEBHOOK LOGS & SYNC MONITOR */}
       {/* ========================================================================= */}
       {activeTab === 'logs' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Radio className="w-4 h-4 text-emerald-500" />
-                Live Webhook & Sync Monitor
-              </h3>
-              <p className="text-xs text-slate-500">
-                Pesan WhatsApp Webhook yang masuk ke backend server secara live.
-              </p>
+        <div className="space-y-6">
+          {/* Active Webhook URL Banner & Quick Copy */}
+          <div className="bg-gradient-to-br from-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-3xl p-5 sm:p-6 shadow-lg space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <Radio className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-white">
+                      Link / URL Webhook WhatsApp Aktif
+                    </h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/40">
+                      🟢 SIAP DIGUNAKAN
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Tempel tautan ini ke pengaturan Webhook di dashboard gateway Anda (Wablas, Fonnte, WhaCenter, dll).
+                  </p>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                fetch('/api/whatsapp/logs')
-                  .then(r => r.json())
-                  .then(d => {
-                    setLogs(d.logs || []);
-                    success('Log Diperbarui', `Ditemukan ${d.logs?.length || 0} log webhook.`);
-                  })
-                  .catch(() => {});
-              }}
-              className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-500/20 flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Segarkan Log
-            </button>
+
+            {/* URL Box */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-950/80 p-2 rounded-2xl border border-slate-800">
+              <input
+                type="text"
+                readOnly
+                value={typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : 'https://your-domain.com/api/whatsapp/webhook'}
+                className="w-full px-3.5 py-2.5 text-xs bg-transparent outline-none text-emerald-400 font-mono select-all font-bold tracking-wide"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const url = typeof window !== 'undefined' ? `${window.location.origin}/api/whatsapp/webhook` : '/api/whatsapp/webhook';
+                  navigator.clipboard.writeText(url);
+                  success('Link Webhook Disalin', 'URL Webhook WhatsApp berhasil disalin ke clipboard!');
+                }}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shrink-0 cursor-pointer shadow-lg shadow-emerald-950/50"
+              >
+                <Copy className="w-4 h-4" />
+                Salin Link Webhook
+              </button>
+            </div>
+
+            {/* Quick Testing Actions */}
+            <div className="pt-2 border-t border-slate-800/80">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  Uji Cepat Simulasi Webhook (Tanpa Aplikasi Eksternal):
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={sendingDummyWebhook}
+                    onClick={() => handleSendDummyWebhook('product')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    📦 Uji Tambah Produk
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sendingDummyWebhook}
+                    onClick={() => handleSendDummyWebhook('stock')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    📈 Uji Tambah Stok
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sendingDummyWebhook}
+                    onClick={() => handleSendDummyWebhook('check')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    🔍 Uji Cek !stok
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950 text-emerald-400 font-mono text-xs overflow-x-auto max-h-96 custom-scrollbar">
-            <p className="text-slate-500 mb-2">// Server Webhook Listener Active on /api/whatsapp/webhook</p>
-            {logs.length === 0 ? (
-              <p className="text-slate-400">// Belum ada webhook baru yang diterima. Kirim POST ke /api/whatsapp/webhook untuk menguji.</p>
-            ) : (
-              logs.map((log, i) => (
-                <div key={i} className="py-1 border-b border-slate-800">
-                  <span className="text-amber-400">[{new Date(log.timestamp || Date.now()).toLocaleTimeString()}]</span>{' '}
-                  <span className="text-blue-400">{log.sender || 'WA'}:</span> {log.rawMessage || JSON.stringify(log)}
+          {/* Live Log Console */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-500" />
+                  Live Webhook Console & Message Logs
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Riwayat pesan WhatsApp yang masuk ke backend server secara live dan tercatat.
+                </p>
+              </div>
+              <button
+                onClick={fetchWebhookLogs}
+                disabled={loadingLogs}
+                className="px-3.5 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-500/20 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingLogs ? 'animate-spin' : ''}`} />
+                Segarkan Log
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 text-emerald-400 font-mono text-xs overflow-x-auto max-h-96 custom-scrollbar border border-slate-800">
+              <div className="text-slate-500 mb-2 border-b border-slate-800 pb-2 flex items-center justify-between">
+                <span>// Server Webhook Listener Active on /api/whatsapp/webhook</span>
+                <span className="text-[10px] text-slate-400">{logs.length} Log Tercatat</span>
+              </div>
+              {logs.length === 0 ? (
+                <p className="text-slate-400 py-4 text-center">
+                  // Belum ada log pesan webhook. Klik tombol "Uji Tambah Produk" di atas atau kirim POST ke URL Webhook untuk mencoba.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {logs.map((log, i) => (
+                    <div key={i} className="py-1.5 border-b border-slate-900/80 flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 text-[11px]">
+                          [{new Date(log.time || log.timestamp || Date.now()).toLocaleTimeString()}]
+                        </span>
+                        <span className="text-blue-400 font-semibold">{log.sender || 'WhatsApp'}:</span>
+                        <span className="text-slate-200">{log.messageText || log.rawMessage || JSON.stringify(log)}</span>
+                      </div>
+                      {log.actionTaken && (
+                        <div className="text-[10px] text-emerald-400/80 pl-4">
+                          ↳ Status: {log.actionTaken}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))
-            )}
+              )}
+            </div>
+
+            {/* Guide Card */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-2">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <HelpCircle className="w-3.5 h-3.5 text-emerald-500" />
+                Format Perintah WhatsApp yang Didukung Bot Kasir:
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                  <strong className="text-slate-800 dark:text-slate-200">1. Tambah / Update Produk:</strong>
+                  <p className="text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                  <strong className="text-slate-800 dark:text-slate-200">2. Tambah Stok Barang Saja:</strong>
+                  <p className="text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    STOK#NamaProduk#JumlahTambah (cth: STOK#Minyak 2L#20)
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
