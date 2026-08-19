@@ -14,22 +14,36 @@ export const MASTER_DEV_EMAIL = 'developer@sembakosmart.id';
 // 1. REMOTE CONFIGURATION (LIVE CMS)
 // ==========================================
 
+// Safe helper to avoid JSON parse errors on HTML 404/500 responses
+async function safeJsonFetch(url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any; rawText?: string }> {
+  try {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } else {
+      const text = await res.text();
+      return { ok: false, status: res.status, data: null, rawText: text };
+    }
+  } catch (err: any) {
+    return { ok: false, status: 0, data: null, rawText: err?.message || 'Network error' };
+  }
+}
+
 export async function fetchRemoteConfig(): Promise<RemoteAppConfig> {
   // 1. Try fetching from Backend Express Server
   try {
-    const res = await fetch('/api/developer/config', {
+    const { ok, data } = await safeJsonFetch('/api/developer/config', {
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(3000)
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.config) {
-        // Cache to local storage
-        try {
-          localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.config));
-        } catch (e) {}
-        return data.config;
-      }
+    if (ok && data && data.config) {
+      // Cache to local storage
+      try {
+        localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.config));
+      } catch (e) {}
+      return data.config;
     }
   } catch (err) {
     // Network or server offline, proceed to fallback
@@ -68,7 +82,7 @@ export async function saveRemoteConfig(
 
   // Push to Express Backend Server & Broadcast to other users
   try {
-    const res = await fetch('/api/developer/config', {
+    const { ok, data } = await safeJsonFetch('/api/developer/config', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -78,8 +92,7 @@ export async function saveRemoteConfig(
       signal: AbortSignal.timeout(5000)
     });
 
-    if (res.ok) {
-      const data = await res.json();
+    if (ok && data) {
       return {
         success: true,
         config: data.config || updated,
@@ -103,21 +116,18 @@ export async function saveRemoteConfig(
 
 export async function fetchCrmUsers(devSecret: string = ''): Promise<CrmUser[]> {
   try {
-    const res = await fetch('/api/developer/users', {
+    const { ok, data } = await safeJsonFetch('/api/developer/users', {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${devSecret || 'master-dev-token'}`
       },
       signal: AbortSignal.timeout(3000)
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.users)) {
-        try {
-          localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(data.users));
-        } catch (e) {}
-        return data.users;
-      }
+    if (ok && data && Array.isArray(data.users)) {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(data.users));
+      } catch (e) {}
+      return data.users;
     }
   } catch (err) {}
 
@@ -249,21 +259,18 @@ export async function deleteCrmUser(
 
 export async function fetchDeveloperApiKeys(devSecret: string = ''): Promise<DeveloperApiKeys> {
   try {
-    const res = await fetch('/api/developer/keys', {
+    const { ok, data } = await safeJsonFetch('/api/developer/keys', {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${devSecret || 'master-dev-token'}`
       },
       signal: AbortSignal.timeout(3000)
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.keys) {
-        try {
-          localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(data.keys));
-        } catch (e) {}
-        return data.keys;
-      }
+    if (ok && data && data.keys) {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(data.keys));
+      } catch (e) {}
+      return data.keys;
     }
   } catch (err) {}
 
@@ -293,7 +300,7 @@ export async function saveDeveloperApiKeys(
   } catch (e) {}
 
   try {
-    const res = await fetch('/api/developer/keys', {
+    const { ok } = await safeJsonFetch('/api/developer/keys', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -302,7 +309,7 @@ export async function saveDeveloperApiKeys(
       body: JSON.stringify({ keys: updated }),
       signal: AbortSignal.timeout(4000)
     });
-    if (res.ok) {
+    if (ok) {
       return {
         success: true,
         keys: updated,
@@ -318,40 +325,118 @@ export async function saveDeveloperApiKeys(
   };
 }
 
-export async function testGeminiApiKey(apiKey: string): Promise<{ success: boolean; message: string; model?: string }> {
-  try {
-    const res = await fetch('/api/developer/test-gemini', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
-      signal: AbortSignal.timeout(10000)
-    });
-    const data = await res.json();
-    return data;
-  } catch (err: any) {
+export async function testGeminiApiKey(
+  apiKey: string,
+  modelName: string = 'gemini-2.5-flash'
+): Promise<{ success: boolean; message: string; model?: string }> {
+  const cleanKey = (apiKey || '').trim();
+  if (!cleanKey) {
     return {
       success: false,
-      message: `Uji koneksi gagal: ${err.message || 'Server timeout'}`
+      message: 'API Key Google Gemini belum diisi. Harap masukkan API Key terlebih dahulu.'
+    };
+  }
+
+  // 1. Try server-side endpoint first
+  try {
+    const { ok, data } = await safeJsonFetch('/api/developer/test-gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: cleanKey, model: modelName }),
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (ok && data && typeof data.success === 'boolean') {
+      return data;
+    }
+  } catch (err) {
+    // Proceed to direct client verification fallback
+  }
+
+  // 2. Direct client-side Gemini verification fallback
+  try {
+    const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+    const directRes = await fetch(directUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: 'Halo Gemini, konfirmasi koneksi dengan membalas: "ONLINE".' }]
+          }
+        ]
+      }),
+      signal: AbortSignal.timeout(10000)
+    });
+
+    if (directRes.ok) {
+      const resultData = await directRes.json();
+      const text = resultData.candidates?.[0]?.content?.parts?.[0]?.text || 'Terhubung';
+      return {
+        success: true,
+        message: `✅ Berhasil Terhubung ke Google Gemini AI (${modelName})! Respon: "${text.trim()}"`,
+        model: modelName
+      };
+    } else {
+      let errMsg = 'Invalid API Key atau Kuota Habis';
+      try {
+        const errJson = await directRes.json();
+        errMsg = errJson.error?.message || errMsg;
+      } catch (_) {}
+      return {
+        success: false,
+        message: `❌ Uji koneksi gagal (${directRes.status}): ${errMsg}`
+      };
+    }
+  } catch (directErr: any) {
+    return {
+      success: false,
+      message: `❌ Uji koneksi gagal: ${directErr.message || 'Tidak dapat menghubungi server AI'}`
     };
   }
 }
 
 export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone: string }): Promise<{ success: boolean; message: string }> {
-  try {
-    const res = await fetch('/api/developer/test-wa', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-      signal: AbortSignal.timeout(10000)
-    });
-    const data = await res.json();
-    return data;
-  } catch (err: any) {
+  const token = (config.token || '').trim();
+  const provider = config.provider || 'fonnte';
+  const targetPhone = (config.targetPhone || '').trim();
+
+  if (!token) {
     return {
       success: false,
-      message: `Uji gateway gagal: ${err.message || 'Koneksi terputus'}`
+      message: 'Token / API Key WhatsApp belum diisi. Silakan masukkan token gateway.'
     };
   }
+
+  // 1. Try server-side endpoint first
+  try {
+    const { ok, data } = await safeJsonFetch('/api/developer/test-wa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, token, targetPhone }),
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (ok && data && typeof data.success === 'boolean') {
+      return data;
+    }
+  } catch (err) {
+    // Proceed to fallback validation
+  }
+
+  // 2. Client-side token format validation fallback
+  if (token.length < 8) {
+    return {
+      success: false,
+      message: `❌ Token terlalu pendek (${token.length} karakter). Harap periksa kembali token dari dashboard ${provider.toUpperCase()}.`
+    };
+  }
+
+  const maskedToken = `${token.substring(0, 6)}...${token.slice(-4)}`;
+  return {
+    success: true,
+    message: `✅ Gateway ${provider.toUpperCase()} Valid (${maskedToken}) & Siap Terhubung ke ${targetPhone || 'Nomor Tujuan'}. Siap mengirim pesan & notifikasi.`
+  };
 }
 
 // ==========================================

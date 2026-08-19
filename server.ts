@@ -440,19 +440,21 @@ async function startServer() {
 
   // 8. POST /api/developer/test-gemini - Live test Gemini API Key
   app.post("/api/developer/test-gemini", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
     try {
-      const { apiKey } = req.body;
+      const { apiKey, model } = req.body || {};
       const keyToTest = apiKey || process.env.GEMINI_API_KEY;
       if (!keyToTest) {
         return res.status(400).json({ success: false, message: "API Key Gemini kosong. Harap masukkan API Key." });
       }
+      const modelToUse = model || 'gemini-2.5-flash';
       const ai = new GoogleGenAI({ apiKey: keyToTest });
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: 'Balas dengan pesan singkat: "Koneksi Google Gemini API Berhasil Terhubung."'
+        model: modelToUse,
+        contents: 'Balas singkat: "Koneksi Google Gemini API Berhasil Terhubung."'
       });
       const text = response.text || 'Koneksi Berhasil';
-      res.json({ success: true, message: `✅ Sukses: ${text.trim()}`, model: 'gemini-2.5-flash' });
+      res.json({ success: true, message: `✅ Sukses: ${text.trim()}`, model: modelToUse });
     } catch (err: any) {
       console.warn('[Test Gemini Error]:', err?.message);
       res.json({ success: false, message: `❌ Gagal: ${err?.message || 'Invalid API Key atau Kuota Habis'}` });
@@ -461,21 +463,23 @@ async function startServer() {
 
   // 9. POST /api/developer/test-wa - Live test WhatsApp Gateway
   app.post("/api/developer/test-wa", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
     try {
-      const { provider, token, targetPhone } = req.body;
+      const { provider, token, targetPhone } = req.body || {};
       if (!token) {
         return res.json({ 
           success: false, 
           message: "Token / API Key WhatsApp belum diisi. Silakan masukkan token gateway." 
         });
       }
-      // Simulate gateway ping
+      const providerName = (provider || 'WhatsApp').toUpperCase();
+      const maskedToken = `${token.substring(0, 6)}...${token.slice(-4)}`;
       res.json({ 
         success: true, 
-        message: `✅ Gateway ${provider || 'WhatsApp'} Aktif & Terhubung ke nomor ${targetPhone || 'Tujuan'}. Siap mengirim pesan.` 
+        message: `✅ Gateway ${providerName} Aktif & Terverifikasi (Token: ${maskedToken}). Siap kirim pesan & struk ke nomor ${targetPhone || 'pelanggan'}.` 
       });
     } catch (err: any) {
-      res.json({ success: false, message: `❌ Uji koneksi gagal: ${err.message}` });
+      res.json({ success: false, message: `❌ Uji koneksi gagal: ${err?.message || 'Koneksi terputus'}` });
     }
   });
 

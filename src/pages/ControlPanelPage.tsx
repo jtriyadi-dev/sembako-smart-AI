@@ -215,7 +215,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
     setTestingGemini(true);
     setGeminiTestResult(null);
     try {
-      const res = await testGeminiApiKey(geminiKeyInput);
+      const res = await testGeminiApiKey(geminiKeyInput, geminiModelInput);
       setGeminiTestResult(res);
       if (res.success) {
         success('Google Gemini AI Terhubung', res.message);
@@ -223,7 +223,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
         warning('Uji Koneksi Gemini Gagal', res.message);
       }
     } catch (e: any) {
-      setGeminiTestResult({ success: false, message: e.message });
+      setGeminiTestResult({ success: false, message: e.message || 'Terjadi kesalahan saat menguji API Key' });
     } finally {
       setTestingGemini(false);
     }
