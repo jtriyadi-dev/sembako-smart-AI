@@ -82,19 +82,108 @@ export function logSupabase(type: 'connected' | 'query' | 'error' | 'realtime' |
   }
 }
 
+import { 
+  encryptPairingPayload, 
+  decryptPairingPayload, 
+  PairingPayload 
+} from '../utils/pairingCrypto';
+
 /**
  * Auto-discovery for Multi-Device connection:
- * 1. Checks URL Query Parameters (?sb_url=...&sb_key=...&store_id=...)
- * 2. If local keys are empty, fetches public keys from server (/api/public/supabase-config)
+ * 1. Checks Encrypted Pairing Token (?pair=... / ?token=... / ?p=...)
+ * 2. Checks Short Pairing Code (?p=123456)
+ * 3. Checks URL Query Parameters (legacy fallback)
+ * 4. If local keys are empty, fetches public keys from server (/api/public/supabase-config)
  */
 export async function initPublicSupabaseConfig(): Promise<SupabaseClient | null> {
   if (typeof window === 'undefined') return null;
 
   try {
-    // 1. Check URL parameters for instant 1-Click QR/Pairing Link
     const urlParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     
+    // A. Encrypted Pairing Token or Short Code (?pair=... | ?token=... | ?p=...)
+    const rawPairToken = urlParams.get('pair') || urlParams.get('token') || hashParams.get('pair') || hashParams.get('token');
+    const rawShortCode = urlParams.get('p') || hashParams.get('p');
+
+    let resolvedPayload: PairingPayload | null = null;
+
+    // 1. Try decrypting if token exists
+    if (rawPairToken) {
+      resolvedPayload = decryptPairingPayload(rawPairToken);
+      if (!resolvedPayload || (!resolvedPayload.supabaseUrl && !resolvedPayload.geminiApiKey)) {
+        // Also try resolving via server if it's a short code or session ID
+        try {
+          const res = await fetch(`/api/public/pairing-session/${encodeURIComponent(rawPairToken)}`, { signal: AbortSignal.timeout(3000) });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.payload) {
+              resolvedPayload = data.payload;
+            }
+          }
+        } catch (_) {}
+      }
+    } else if (rawShortCode) {
+      // Check if it's an encrypted string or 6-digit code
+      const decrypted = decryptPairingPayload(rawShortCode);
+      if (decrypted && (decrypted.supabaseUrl || decrypted.geminiApiKey)) {
+        resolvedPayload = decrypted;
+      } else {
+        // Resolve from backend short pairing session endpoint
+        try {
+          const res = await fetch(`/api/public/pairing-session/${encodeURIComponent(rawShortCode)}`, { signal: AbortSignal.timeout(3000) });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.payload) {
+              resolvedPayload = data.payload;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 2. If resolved from encrypted token / short code
+    if (resolvedPayload && (resolvedPayload.supabaseUrl || resolvedPayload.geminiApiKey)) {
+      console.log('[Device Auto-Pairing] Kredensial terenkripsi berhasil diurai!');
+      const cleanUrl = sanitizeSupabaseUrl(resolvedPayload.supabaseUrl || '');
+      const cleanKey = sanitizeSupabaseKey(resolvedPayload.supabaseAnonKey || '');
+      
+      const toSave: any = {
+        updatedAt: new Date().toISOString()
+      };
+      if (cleanUrl) toSave.supabaseUrl = cleanUrl;
+      if (cleanKey) toSave.supabaseAnonKey = cleanKey;
+      if (resolvedPayload.geminiApiKey) toSave.geminiApiKey = resolvedPayload.geminiApiKey.trim();
+      if (resolvedPayload.waApiKey) toSave.waApiKey = resolvedPayload.waApiKey.trim();
+      if (resolvedPayload.waGatewayProvider) toSave.waGatewayProvider = resolvedPayload.waGatewayProvider.trim();
+      if (resolvedPayload.waSenderNumber) toSave.waSenderNumber = resolvedPayload.waSenderNumber.trim();
+      
+      try {
+        const existing = JSON.parse(localStorage.getItem('sem_api_keys') || '{}');
+        const merged = { ...existing, ...toSave };
+        localStorage.setItem('sembako_developer_api_keys', JSON.stringify(merged));
+        localStorage.setItem('sem_api_keys', JSON.stringify(merged));
+      } catch (_) {
+        localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
+        localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+      }
+
+      if (resolvedPayload.storeId) {
+        setCurrentStoreId(resolvedPayload.storeId);
+      }
+
+      // Sembunyikan dan bersihkan URL browser seketika agar aman dan tidak terlihat pelanggan
+      try {
+        const cleanHref = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanHref);
+      } catch (_) {}
+
+      if (cleanUrl && cleanKey) {
+        return getSupabaseClient(cleanUrl, cleanKey);
+      }
+    }
+
+    // B. Legacy URL parameters fallback (?sb_url=...&sb_key=...)
     const paramUrl = urlParams.get('sb_url') || hashParams.get('sb_url');
     const paramKey = urlParams.get('sb_key') || hashParams.get('sb_key');
     const paramStore = urlParams.get('store_id') || urlParams.get('store') || hashParams.get('store_id');
@@ -104,7 +193,7 @@ export async function initPublicSupabaseConfig(): Promise<SupabaseClient | null>
     const paramWaSender = urlParams.get('wa_sender') || hashParams.get('wa_sender');
 
     if (paramUrl && paramKey) {
-      console.log('[Device Auto-Pairing] Parameter koneksi lengkap ditemukan di URL! Menyimpan kredensial...');
+      console.log('[Device Auto-Pairing] Parameter koneksi ditemukan di URL! Menyimpan kredensial...');
       const cleanUrl = sanitizeSupabaseUrl(paramUrl);
       const cleanKey = sanitizeSupabaseKey(paramKey);
       
@@ -133,7 +222,7 @@ export async function initPublicSupabaseConfig(): Promise<SupabaseClient | null>
         setCurrentStoreId(paramStore);
       }
 
-      // Clean URL query without page reload
+      // Bersihkan URL bar segera
       try {
         const cleanHref = window.location.origin + window.location.pathname;
         window.history.replaceState({}, document.title, cleanHref);
@@ -179,7 +268,8 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Generate 1-Click Pairing URL for other devices
+ * Generate Encrypted 1-Click Pairing URL for other devices
+ * Encrypts all sensitive keys so they are not exposed in plaintext.
  */
 export function generateDevicePairingUrl(customStoreId?: string): string {
   if (typeof window === 'undefined') return '';
@@ -197,25 +287,82 @@ export function generateDevicePairingUrl(customStoreId?: string): string {
   const key = (localKeys.supabaseAnonKey || localKeys.supabaseServiceRoleKey || env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY || '').trim();
   const activeStore = customStoreId || getCurrentStoreId();
 
-  if (!url || !key) return '';
+  const payload: PairingPayload = {
+    supabaseUrl: url || undefined,
+    supabaseAnonKey: key || undefined,
+    storeId: activeStore,
+    geminiApiKey: localKeys.geminiApiKey || undefined,
+    waApiKey: localKeys.waApiKey || undefined,
+    waGatewayProvider: localKeys.waGatewayProvider || 'fonnte',
+    waSenderNumber: localKeys.waSenderNumber || undefined,
+    createdAt: Date.now()
+  };
 
+  const encryptedToken = encryptPairingPayload(payload);
   const origin = window.location.origin + window.location.pathname;
-  let pairingLink = `${origin}?sb_url=${encodeURIComponent(url)}&sb_key=${encodeURIComponent(key)}&store_id=${encodeURIComponent(activeStore)}`;
-  
-  if (localKeys.geminiApiKey) {
-    pairingLink += `&gemini_key=${encodeURIComponent(localKeys.geminiApiKey)}`;
-  }
-  if (localKeys.waApiKey) {
-    pairingLink += `&wa_key=${encodeURIComponent(localKeys.waApiKey)}`;
-  }
-  if (localKeys.waGatewayProvider) {
-    pairingLink += `&wa_provider=${encodeURIComponent(localKeys.waGatewayProvider)}`;
-  }
-  if (localKeys.waSenderNumber) {
-    pairingLink += `&wa_sender=${encodeURIComponent(localKeys.waSenderNumber)}`;
+
+  if (encryptedToken) {
+    return `${origin}?pair=${encryptedToken}`;
   }
 
-  return pairingLink;
+  // Fallback
+  return `${origin}?store_id=${encodeURIComponent(activeStore)}`;
+}
+
+/**
+ * Generate Server-Backed Short 6-Digit Pairing Session
+ */
+export async function createShortPairingSession(customStoreId?: string): Promise<{ code: string; shortUrl: string; encryptedUrl: string }> {
+  if (typeof window === 'undefined') return { code: '', shortUrl: '', encryptedUrl: '' };
+
+  let localKeys: any = {};
+  try {
+    const rawDevKeys = localStorage.getItem('sembako_developer_api_keys');
+    const rawSemKeys = localStorage.getItem('sem_api_keys');
+    if (rawDevKeys) localKeys = { ...localKeys, ...JSON.parse(rawDevKeys) };
+    if (rawSemKeys) localKeys = { ...localKeys, ...JSON.parse(rawSemKeys) };
+  } catch (_) {}
+
+  const env = (import.meta as any).env || {};
+  const activeStore = customStoreId || getCurrentStoreId();
+
+  const payload: PairingPayload = {
+    supabaseUrl: (localKeys.supabaseUrl || env.VITE_SUPABASE_URL || env.SUPABASE_URL || '').trim(),
+    supabaseAnonKey: (localKeys.supabaseAnonKey || env.VITE_SUPABASE_ANON_KEY || '').trim(),
+    storeId: activeStore,
+    geminiApiKey: localKeys.geminiApiKey || undefined,
+    waApiKey: localKeys.waApiKey || undefined,
+    waGatewayProvider: localKeys.waGatewayProvider || 'fonnte',
+    waSenderNumber: localKeys.waSenderNumber || undefined,
+  };
+
+  const encryptedUrl = generateDevicePairingUrl(customStoreId);
+  const origin = window.location.origin + window.location.pathname;
+
+  try {
+    const res = await fetch('/api/public/pairing-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload, storeId: activeStore }),
+      signal: AbortSignal.timeout(3500)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.code) {
+        return {
+          code: data.code,
+          shortUrl: `${origin}?p=${data.code}`,
+          encryptedUrl
+        };
+      }
+    }
+  } catch (_) {}
+
+  return {
+    code: '',
+    shortUrl: encryptedUrl,
+    encryptedUrl
+  };
 }
 
 /**

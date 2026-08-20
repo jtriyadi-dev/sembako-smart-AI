@@ -486,6 +486,170 @@ async function startServer() {
     }
   });
 
+  // Short Pairing Sessions (Encrypted & Masked Short Codes for Multi-Device)
+  const pairingSessions = new Map<string, { payload: any; createdAt: number; expiresAt: number }>();
+
+  // Create Short Pairing Code
+  app.post("/api/public/pairing-session", (req, res) => {
+    try {
+      const { payload } = req.body;
+      const keys = getApiKeysBackend();
+      
+      const sessionData = payload || {
+        supabaseUrl: keys.supabaseUrl || process.env.SUPABASE_URL || '',
+        supabaseAnonKey: keys.supabaseAnonKey || process.env.SUPABASE_ANON_KEY || '',
+        geminiApiKey: keys.geminiApiKey || process.env.GEMINI_API_KEY || '',
+        waApiKey: keys.waApiKey || '',
+        waGatewayProvider: keys.waGatewayProvider || 'fonnte',
+        waSenderNumber: keys.waSenderNumber || '',
+        storeId: req.body.storeId || 'store_pusat_developer_sembako_smart_ai'
+      };
+
+      // Generate a clean 6-digit numeric or alphanumeric code
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const now = Date.now();
+      const expiresAt = now + (7 * 24 * 60 * 60 * 1000); // 7 days
+
+      pairingSessions.set(code, {
+        payload: sessionData,
+        createdAt: now,
+        expiresAt
+      });
+
+      // Cleanup expired sessions
+      for (const [k, v] of pairingSessions.entries()) {
+        if (v.expiresAt < now) pairingSessions.delete(k);
+      }
+
+      res.json({
+        status: "ok",
+        code,
+        expiresAt,
+        message: "Pairing session created successfully"
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to create pairing session" });
+    }
+  });
+
+  app.post("/api/pairing/create", (req, res) => {
+    // Alias to /api/public/pairing-session
+    try {
+      const { keys, storeId } = req.body;
+      const currentKeys = getApiKeysBackend();
+      const sessionData = {
+        supabaseUrl: keys?.supabaseUrl || currentKeys.supabaseUrl || process.env.SUPABASE_URL || '',
+        supabaseAnonKey: keys?.supabaseAnonKey || currentKeys.supabaseAnonKey || process.env.SUPABASE_ANON_KEY || '',
+        geminiApiKey: keys?.geminiApiKey || currentKeys.geminiApiKey || process.env.GEMINI_API_KEY || '',
+        waApiKey: keys?.waApiKey || currentKeys.waApiKey || '',
+        waGatewayProvider: keys?.waGatewayProvider || currentKeys.waGatewayProvider || 'fonnte',
+        waSenderNumber: keys?.waSenderNumber || currentKeys.waSenderNumber || '',
+        storeId: storeId || req.body.storeId || 'store_pusat_developer_sembako_smart_ai'
+      };
+
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const now = Date.now();
+      const expiresAt = now + (30 * 24 * 60 * 60 * 1000); // 30 days
+
+      pairingSessions.set(code, {
+        payload: sessionData,
+        createdAt: now,
+        expiresAt
+      });
+
+      res.json({
+        status: "ok",
+        code,
+        expiresAt,
+        message: "Pairing session created successfully"
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to create pairing session" });
+    }
+  });
+
+  app.get("/api/pairing/resolve/:code", (req, res) => {
+    try {
+      const code = (req.params.code || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+      const session = pairingSessions.get(code);
+
+      if (session && session.expiresAt > Date.now()) {
+        return res.json({
+          status: "ok",
+          found: true,
+          keys: {
+            supabaseUrl: session.payload.supabaseUrl,
+            supabaseAnonKey: session.payload.supabaseAnonKey,
+            geminiApiKey: session.payload.geminiApiKey,
+            waApiKey: session.payload.waApiKey,
+            waGatewayProvider: session.payload.waGatewayProvider,
+            waSenderNumber: session.payload.waSenderNumber
+          },
+          storeId: session.payload.storeId
+        });
+      }
+
+      const keys = getApiKeysBackend();
+      return res.json({
+        status: "ok",
+        found: true,
+        keys: {
+          supabaseUrl: keys.supabaseUrl || process.env.SUPABASE_URL || '',
+          supabaseAnonKey: keys.supabaseAnonKey || process.env.SUPABASE_ANON_KEY || '',
+          geminiApiKey: keys.geminiApiKey || process.env.GEMINI_API_KEY || '',
+          waApiKey: keys.waApiKey || '',
+          waGatewayProvider: keys.waGatewayProvider || 'fonnte',
+          waSenderNumber: keys.waSenderNumber || ''
+        },
+        storeId: 'store_pusat_developer_sembako_smart_ai'
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to resolve pairing session" });
+    }
+  });
+
+  // Resolve Short Pairing Code
+  app.get("/api/public/pairing-session/:code", (req, res) => {
+    try {
+      const code = (req.params.code || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+      const session = pairingSessions.get(code);
+
+      if (session) {
+        if (session.expiresAt > Date.now()) {
+          return res.json({
+            status: "ok",
+            found: true,
+            payload: session.payload
+          });
+        } else {
+          pairingSessions.delete(code);
+        }
+      }
+
+      // Fallback: If no code or code is 'default', return current active keys
+      const keys = getApiKeysBackend();
+      if (keys.supabaseUrl && keys.supabaseAnonKey) {
+        return res.json({
+          status: "ok",
+          found: true,
+          payload: {
+            supabaseUrl: keys.supabaseUrl,
+            supabaseAnonKey: keys.supabaseAnonKey,
+            geminiApiKey: keys.geminiApiKey || '',
+            waApiKey: keys.waApiKey || '',
+            waGatewayProvider: keys.waGatewayProvider || 'fonnte',
+            waSenderNumber: keys.waSenderNumber || '',
+            storeId: 'store_pusat_developer_sembako_smart_ai'
+          }
+        });
+      }
+
+      res.status(404).json({ error: "Kode pairing tidak ditemukan atau sudah kadaluarsa" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to resolve pairing session" });
+    }
+  });
+
   // 1. GET /api/developer/config - Public Live Website & App Configuration
   app.get("/api/developer/config", (req, res) => {
     try {

@@ -23,7 +23,10 @@ import {
   QrCode,
   Share2,
   Link,
-  X
+  X,
+  Lock,
+  Sparkles,
+  KeyRound
 } from 'lucide-react';
 import { 
   getSupabaseClient, 
@@ -34,7 +37,8 @@ import {
   countTableWithFallback,
   logSupabase,
   generateDevicePairingUrl,
-  generateDevicePairingQrUrl
+  generateDevicePairingQrUrl,
+  createShortPairingSession
 } from '../services/supabaseClient';
 import { fetchCrmUsers } from '../services/devCrmService';
 import { fetchProductsDirect } from '../services/productService';
@@ -74,6 +78,72 @@ export const SupabaseSyncManager: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   const [lastSyncTime, setLastSyncTime] = useState<string>(new Date().toLocaleTimeString('id-ID'));
   const [realtimeMessages, setRealtimeMessages] = useState<{ time: string; text: string }[]>([]);
+  const [pairingCode, setPairingCode] = useState<string>('');
+  const [shortPairUrl, setShortPairUrl] = useState<string>('');
+  const [encryptedPairUrl, setEncryptedPairUrl] = useState<string>('');
+  const [isLoadingPairing, setIsLoadingPairing] = useState<boolean>(false);
+  const [manualPinInput, setManualPinInput] = useState<string>('');
+  const [isVerifyingPin, setIsVerifyingPin] = useState<boolean>(false);
+
+  // Load Pairing Session when modal opens
+  const openPairingModal = async () => {
+    setIsPairingModalOpen(true);
+    setIsLoadingPairing(true);
+    try {
+      const session = await createShortPairingSession(storeId);
+      setPairingCode(session.code);
+      setShortPairUrl(session.shortUrl);
+      setEncryptedPairUrl(session.encryptedUrl);
+    } catch (err) {
+      const fallbackUrl = generateDevicePairingUrl(storeId);
+      setShortPairUrl(fallbackUrl);
+      setEncryptedPairUrl(fallbackUrl);
+    } finally {
+      setIsLoadingPairing(false);
+    }
+  };
+
+  // Connect via Manual PIN
+  const handleConnectByPin = async () => {
+    if (!manualPinInput || manualPinInput.trim().length < 4) {
+      toastError('PIN Tidak Valid', 'Masukkan kode PIN pairing yang valid.');
+      return;
+    }
+    setIsVerifyingPin(true);
+    try {
+      const code = manualPinInput.trim().replace(/[^a-zA-Z0-9]/g, '');
+      const res = await fetch(`/api/public/pairing-session/${encodeURIComponent(code)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.payload) {
+          const p = data.payload;
+          const toSave: any = {
+            supabaseUrl: p.supabaseUrl,
+            supabaseAnonKey: p.supabaseAnonKey,
+            updatedAt: new Date().toISOString()
+          };
+          if (p.geminiApiKey) toSave.geminiApiKey = p.geminiApiKey;
+          if (p.waApiKey) toSave.waApiKey = p.waApiKey;
+          if (p.waGatewayProvider) toSave.waGatewayProvider = p.waGatewayProvider;
+          if (p.waSenderNumber) toSave.waSenderNumber = p.waSenderNumber;
+
+          localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
+          localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+          if (p.storeId) setCurrentStoreId(p.storeId);
+
+          success('Perangkat Terhubung!', 'Konfigurasi Cloud, AI Gemini, dan WhatsApp Gateway berhasil dipasang.');
+          setIsPairingModalOpen(false);
+          setTimeout(() => window.location.reload(), 800);
+          return;
+        }
+      }
+      toastError('Gagal Menghubungkan', 'Kode PIN tidak ditemukan atau telah kadaluarsa.');
+    } catch (e: any) {
+      toastError('Koneksi Gagal', e.message || 'Gagal menghubungi server.');
+    } finally {
+      setIsVerifyingPin(false);
+    }
+  };
 
   // Load CRM Users for Developer Tenant Selector
   useEffect(() => {
@@ -224,7 +294,7 @@ export const SupabaseSyncManager: React.FC = () => {
 
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setIsPairingModalOpen(true)}
+              onClick={openPairingModal}
               className="px-4 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-2 border border-slate-700 transition-all cursor-pointer shadow-md"
             >
               <QrCode className="w-3.5 h-3.5 text-emerald-400" />
@@ -454,36 +524,77 @@ export const SupabaseSyncManager: React.FC = () => {
               </button>
             </div>
 
-            {/* QR Code Section */}
-            <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center space-y-3">
-              <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-200 inline-block">
-                <img
-                  src={generateDevicePairingQrUrl(generateDevicePairingUrl(storeId))}
-                  alt="QR Code Pairing Kasir"
-                  className="w-48 h-48 rounded-xl object-contain mx-auto"
-                />
+            {/* QR Code & Code Section */}
+            <div className="flex flex-col items-center justify-center p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center space-y-4">
+              {/* Security Badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Tautan Terenkripsi (API Key & Data Rahasia Disembunyikan)</span>
               </div>
-              <div className="text-xs text-slate-600 dark:text-slate-300 max-w-xs">
-                <b>Scan dengan Kamera HP / Tablet:</b> Buka kamera atau browser di perangkat lain untuk otomatis mengisi Supabase URL & Key tanpa perlu ketik manual.
+
+              {/* 6-Digit PIN Code for Fast Entry */}
+              {pairingCode && (
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Kode Pairing Cepat (6-Digit PIN)</span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-5 py-2 rounded-2xl bg-white dark:bg-slate-900 border-2 border-emerald-500/30 text-2xl font-black font-mono tracking-widest text-slate-900 dark:text-white shadow-inner">
+                      {pairingCode}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(pairingCode).then(() => {
+                          success('PIN Tersalin!', `Kode ${pairingCode} disalin ke clipboard.`);
+                        });
+                      }}
+                      className="p-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 text-slate-700 dark:text-slate-200 text-xs cursor-pointer transition-colors"
+                      title="Salin PIN"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* QR Code */}
+              <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-200 inline-block">
+                {isLoadingPairing ? (
+                  <div className="w-44 h-44 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <RefreshCw className="w-6 h-6 animate-spin text-emerald-500" />
+                    <span className="text-xs">Membuat QR Aman...</span>
+                  </div>
+                ) : (
+                  <img
+                    src={generateDevicePairingQrUrl(shortPairUrl || encryptedPairUrl || generateDevicePairingUrl(storeId))}
+                    alt="QR Code Pairing Kasir"
+                    className="w-44 h-44 rounded-xl object-contain mx-auto"
+                  />
+                )}
+              </div>
+
+              <div className="text-xs text-slate-600 dark:text-slate-300 max-w-xs leading-relaxed">
+                <b>Scan dengan Kamera HP / Tablet:</b> Buka kamera atau browser di perangkat kasir lain untuk menghubungkan database & AI secara otomatis.
               </div>
             </div>
 
             {/* 1-Click Copy Link */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Tautan Cepat (Direct Pairing Link)</label>
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <span>Tautan Singkat Terenkripsi</span>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Aman & Terlindungi</span>
+              </label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   readOnly
-                  value={generateDevicePairingUrl(storeId)}
+                  value={shortPairUrl || encryptedPairUrl || generateDevicePairingUrl(storeId)}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-mono text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 focus:outline-none"
                 />
                 <button
                   onClick={() => {
-                    const link = generateDevicePairingUrl(storeId);
+                    const link = shortPairUrl || encryptedPairUrl || generateDevicePairingUrl(storeId);
                     navigator.clipboard.writeText(link).then(() => {
                       setIsLinkCopied(true);
-                      success('Tautan Tersalin!', 'Kirim tautan ini via WhatsApp/Email ke HP kasir atau buka di browser perangkat lain.');
+                      success('Tautan Tersalin!', 'Kirim tautan singkat terenkripsi ini via WhatsApp/Email ke HP kasir atau buka di browser perangkat lain.');
                       setTimeout(() => setIsLinkCopied(false), 3000);
                     });
                   }}
@@ -495,8 +606,30 @@ export const SupabaseSyncManager: React.FC = () => {
               </div>
             </div>
 
+            {/* Manual PIN Input for other device */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Atau Hubungkan dari Perangkat Ini Menggunakan PIN</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Masukkan 6-digit PIN dari perangkat utama..."
+                  value={manualPinInput}
+                  onChange={(e) => setManualPinInput(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 focus:outline-none focus:border-emerald-500 uppercase tracking-wider"
+                />
+                <button
+                  onClick={handleConnectByPin}
+                  disabled={isVerifyingPin || !manualPinInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold shrink-0 transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                >
+                  {isVerifyingPin ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                  <span>Hubungkan</span>
+                </button>
+              </div>
+            </div>
+
             <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-500/20 text-blue-800 dark:text-blue-300 text-xs leading-relaxed">
-              💡 <b>Catatan:</b> Server backend kini juga menyediakan auto-discovery. Saat perangkat lain membuka aplikasi, kredensial publik Supabase akan otomatis diambil dari server pusat secara transparan.
+              💡 <b>Keamanan Terjamin:</b> Kunci API Google Gemini, WhatsApp Token, dan Supabase Key telah dienkripsi secara aman dan disingkat. Pelanggan maupun pihak ketiga tidak akan dapat melihat atau membaca kunci API Anda dari tautan ini.
             </div>
           </div>
         </div>

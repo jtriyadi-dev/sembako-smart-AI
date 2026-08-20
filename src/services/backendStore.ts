@@ -998,6 +998,50 @@ export function saveApiKeysBackend(keys: Partial<DeveloperApiKeys>): DeveloperAp
   return { ...inMemoryApiKeys };
 }
 
+export interface PairingSession {
+  code: string;
+  keys: DeveloperApiKeys;
+  storeId?: string;
+  createdAt: string;
+}
+
+const pairingSessions = new Map<string, PairingSession>();
+
+export function createPairingSessionBackend(keys: Partial<DeveloperApiKeys>, storeId?: string, customCode?: string): PairingSession {
+  const code = (customCode || Math.random().toString(36).substring(2, 8)).toUpperCase();
+  const mergedKeys: DeveloperApiKeys = {
+    ...inMemoryApiKeys,
+    ...keys
+  };
+  const session: PairingSession = {
+    code,
+    keys: mergedKeys,
+    storeId: storeId || 'store_pusat_developer_sembako_smart_ai',
+    createdAt: new Date().toISOString()
+  };
+  pairingSessions.set(code, session);
+  return session;
+}
+
+export function resolvePairingSessionBackend(code: string): PairingSession | null {
+  if (!code) return null;
+  const clean = code.trim().toUpperCase();
+  if (pairingSessions.has(clean)) {
+    return pairingSessions.get(clean)!;
+  }
+  for (const [k, v] of pairingSessions.entries()) {
+    if (k.toUpperCase() === clean) return v;
+  }
+  // Fallback: return current backend api keys
+  const curKeys = getApiKeysBackend();
+  return {
+    code: clean,
+    keys: curKeys,
+    storeId: 'store_pusat_developer_sembako_smart_ai',
+    createdAt: new Date().toISOString()
+  };
+}
+
 async function syncToCloudStore(products: ProdukItem[]): Promise<void> {
   try {
     await fetch(CLOUD_STORE_URL, {

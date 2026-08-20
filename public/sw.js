@@ -45,8 +45,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
-  // Skip caching for external APIs, Firebase Firestore/Auth, or Gemini AI endpoints
+  // Skip caching for development, hot module reload, Vite, and external API requests
   if (
+    url.pathname.includes('@vite') ||
+    url.pathname.includes('node_modules') ||
+    url.pathname.startsWith('/src/') ||
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
     url.hostname.includes('generativelanguage.googleapis.com') ||
