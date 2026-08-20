@@ -98,20 +98,36 @@ export async function initPublicSupabaseConfig(): Promise<SupabaseClient | null>
     const paramUrl = urlParams.get('sb_url') || hashParams.get('sb_url');
     const paramKey = urlParams.get('sb_key') || hashParams.get('sb_key');
     const paramStore = urlParams.get('store_id') || urlParams.get('store') || hashParams.get('store_id');
+    const paramGemini = urlParams.get('gemini_key') || hashParams.get('gemini_key');
+    const paramWaKey = urlParams.get('wa_key') || hashParams.get('wa_key');
+    const paramWaProvider = urlParams.get('wa_provider') || hashParams.get('wa_provider');
+    const paramWaSender = urlParams.get('wa_sender') || hashParams.get('wa_sender');
 
     if (paramUrl && paramKey) {
-      console.log('[Supabase Auto-Pairing] Parameter koneksi ditemukan di URL! Menyimpan kredensial...');
+      console.log('[Device Auto-Pairing] Parameter koneksi lengkap ditemukan di URL! Menyimpan kredensial...');
       const cleanUrl = sanitizeSupabaseUrl(paramUrl);
       const cleanKey = sanitizeSupabaseKey(paramKey);
       
-      const toSave = {
+      const toSave: any = {
         supabaseUrl: cleanUrl,
         supabaseAnonKey: cleanKey,
         updatedAt: new Date().toISOString()
       };
+
+      if (paramGemini) toSave.geminiApiKey = paramGemini.trim();
+      if (paramWaKey) toSave.waApiKey = paramWaKey.trim();
+      if (paramWaProvider) toSave.waGatewayProvider = paramWaProvider.trim();
+      if (paramWaSender) toSave.waSenderNumber = paramWaSender.trim();
       
-      localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
-      localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+      try {
+        const existing = JSON.parse(localStorage.getItem('sem_api_keys') || '{}');
+        const merged = { ...existing, ...toSave };
+        localStorage.setItem('sembako_developer_api_keys', JSON.stringify(merged));
+        localStorage.setItem('sem_api_keys', JSON.stringify(merged));
+      } catch (_) {
+        localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
+        localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+      }
       
       if (paramStore) {
         setCurrentStoreId(paramStore);
@@ -184,7 +200,22 @@ export function generateDevicePairingUrl(customStoreId?: string): string {
   if (!url || !key) return '';
 
   const origin = window.location.origin + window.location.pathname;
-  return `${origin}?sb_url=${encodeURIComponent(url)}&sb_key=${encodeURIComponent(key)}&store_id=${encodeURIComponent(activeStore)}`;
+  let pairingLink = `${origin}?sb_url=${encodeURIComponent(url)}&sb_key=${encodeURIComponent(key)}&store_id=${encodeURIComponent(activeStore)}`;
+  
+  if (localKeys.geminiApiKey) {
+    pairingLink += `&gemini_key=${encodeURIComponent(localKeys.geminiApiKey)}`;
+  }
+  if (localKeys.waApiKey) {
+    pairingLink += `&wa_key=${encodeURIComponent(localKeys.waApiKey)}`;
+  }
+  if (localKeys.waGatewayProvider) {
+    pairingLink += `&wa_provider=${encodeURIComponent(localKeys.waGatewayProvider)}`;
+  }
+  if (localKeys.waSenderNumber) {
+    pairingLink += `&wa_sender=${encodeURIComponent(localKeys.waSenderNumber)}`;
+  }
+
+  return pairingLink;
 }
 
 /**

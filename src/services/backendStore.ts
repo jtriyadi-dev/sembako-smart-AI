@@ -192,6 +192,22 @@ export async function fetchAllFromCloudStore(): Promise<void> {
           }
         }
 
+        if (d.apiKeys && typeof d.apiKeys === 'object') {
+          inMemoryApiKeys = {
+            ...inMemoryApiKeys,
+            ...d.apiKeys,
+            geminiApiKey: d.apiKeys.geminiApiKey || inMemoryApiKeys.geminiApiKey || process.env.GEMINI_API_KEY || '',
+            waApiKey: d.apiKeys.waApiKey || inMemoryApiKeys.waApiKey || '',
+            waSenderNumber: d.apiKeys.waSenderNumber || inMemoryApiKeys.waSenderNumber || '',
+            waGatewayProvider: d.apiKeys.waGatewayProvider || inMemoryApiKeys.waGatewayProvider || 'fonnte',
+            supabaseUrl: d.apiKeys.supabaseUrl || inMemoryApiKeys.supabaseUrl || process.env.SUPABASE_URL || '',
+            supabaseAnonKey: d.apiKeys.supabaseAnonKey || inMemoryApiKeys.supabaseAnonKey || process.env.SUPABASE_ANON_KEY || '',
+          };
+          if (inMemoryApiKeys.geminiApiKey) process.env.GEMINI_API_KEY = inMemoryApiKeys.geminiApiKey;
+          if (inMemoryApiKeys.supabaseUrl) process.env.SUPABASE_URL = inMemoryApiKeys.supabaseUrl;
+          if (inMemoryApiKeys.supabaseAnonKey) process.env.SUPABASE_ANON_KEY = inMemoryApiKeys.supabaseAnonKey;
+        }
+
         if (Array.isArray(d.products) && d.products.length > 0) {
           const mergedProdMap = new Map<string, ProdukItem>();
           inMemoryProducts.forEach(p => mergedProdMap.set(p.id, p));
@@ -896,7 +912,65 @@ export async function authenticateUserBackend(identifier: string, password: stri
   };
 }
 
+export async function syncApiKeysToSupabaseBackend(keys: DeveloperApiKeys): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const payload = {
+      id: 'app_api_keys',
+      config: keys,
+      version: 1,
+      updated_at: new Date().toISOString(),
+      updated_by: 'Control Panel Developer'
+    };
+    const res = await fetch(`${sb.url}/rest/v1/remote_config`, {
+      method: 'POST',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4000)
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function fetchApiKeysFromSupabaseBackend(): Promise<DeveloperApiKeys> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return inMemoryApiKeys;
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/remote_config?id=eq.app_api_keys&select=*`, {
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+      },
+      signal: AbortSignal.timeout(3500)
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.config) {
+        const cloudKeys = rows[0].config;
+        inMemoryApiKeys = {
+          ...inMemoryApiKeys,
+          ...cloudKeys
+        };
+        if (inMemoryApiKeys.geminiApiKey) process.env.GEMINI_API_KEY = inMemoryApiKeys.geminiApiKey;
+        if (inMemoryApiKeys.supabaseUrl) process.env.SUPABASE_URL = inMemoryApiKeys.supabaseUrl;
+        if (inMemoryApiKeys.supabaseAnonKey) process.env.SUPABASE_ANON_KEY = inMemoryApiKeys.supabaseAnonKey;
+        saveDeveloperStoresToFile();
+      }
+    }
+  } catch (e) {}
+  return inMemoryApiKeys;
+}
+
 export function getApiKeysBackend(): DeveloperApiKeys {
+  fetchApiKeysFromSupabaseBackend().catch(() => {});
   return { ...inMemoryApiKeys };
 }
 
@@ -920,6 +994,7 @@ export function saveApiKeysBackend(keys: Partial<DeveloperApiKeys>): DeveloperAp
     process.env.SUPABASE_SERVICE_ROLE_KEY = keys.supabaseServiceRoleKey;
   }
   saveDeveloperStoresToFile();
+  syncApiKeysToSupabaseBackend(inMemoryApiKeys).catch(() => {});
   return { ...inMemoryApiKeys };
 }
 

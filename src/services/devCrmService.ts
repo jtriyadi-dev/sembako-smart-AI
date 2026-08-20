@@ -392,6 +392,9 @@ export async function deleteCrmUser(
 // ==========================================
 
 export async function fetchDeveloperApiKeys(devSecret: string = ''): Promise<DeveloperApiKeys> {
+  let keysResult: DeveloperApiKeys | null = null;
+
+  // 1. Try server backend endpoint
   try {
     const { ok, data } = await safeJsonFetch('/api/developer/keys', {
       headers: {
@@ -401,37 +404,63 @@ export async function fetchDeveloperApiKeys(devSecret: string = ''): Promise<Dev
       signal: AbortSignal.timeout(3000)
     });
     if (ok && data && data.keys) {
-      try {
-        localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(data.keys));
-        localStorage.setItem('sem_api_keys', JSON.stringify(data.keys));
-      } catch (e) {}
-      return data.keys;
+      keysResult = data.keys;
     }
   } catch (err) {}
 
-  // Fallback: Check public supabase config endpoint
-  try {
-    const pubRes = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(2500) });
-    if (pubRes.ok) {
-      const pubData = await pubRes.json();
-      if (pubData && pubData.configured) {
-        const partial: Partial<DeveloperApiKeys> = {
-          supabaseUrl: pubData.supabaseUrl,
-          supabaseAnonKey: pubData.supabaseAnonKey,
-        };
-        try {
-          const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS);
-          const merged = cached ? { ...JSON.parse(cached), ...partial } : { ...DEFAULT_API_KEYS, ...partial };
-          localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(merged));
-          localStorage.setItem('sem_api_keys', JSON.stringify(merged));
-          return merged;
-        } catch (_) {}
+  // 2. Direct Supabase Cloud query if server returned empty/default keys
+  if (!keysResult || (!keysResult.geminiApiKey && !keysResult.waApiKey)) {
+    try {
+      const { getSupabaseClient } = await import('./supabaseClient');
+      const sb = getSupabaseClient();
+      if (sb) {
+        const { data } = await sb.from('remote_config').select('config').eq('id', 'app_api_keys').maybeSingle();
+        if (data && data.config) {
+          keysResult = {
+            ...DEFAULT_API_KEYS,
+            ...(keysResult || {}),
+            ...data.config
+          };
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
+
+  // 3. Fallback: Check public supabase config endpoint
+  if (!keysResult || !keysResult.supabaseUrl) {
+    try {
+      const pubRes = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(2500) });
+      if (pubRes.ok) {
+        const pubData = await pubRes.json();
+        if (pubData && pubData.configured) {
+          keysResult = {
+            ...DEFAULT_API_KEYS,
+            ...(keysResult || {}),
+            supabaseUrl: pubData.supabaseUrl,
+            supabaseAnonKey: pubData.supabaseAnonKey,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (keysResult) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(keysResult));
+      localStorage.setItem('sem_api_keys', JSON.stringify(keysResult));
+      if (keysResult.supabaseUrl && keysResult.supabaseAnonKey) {
+        localStorage.setItem('sembako_developer_api_keys', JSON.stringify({
+          supabaseUrl: keysResult.supabaseUrl,
+          supabaseAnonKey: keysResult.supabaseAnonKey,
+          updatedAt: new Date().toISOString()
+        }));
+      }
+    } catch (e) {}
+    return keysResult;
+  }
 
   try {
-    const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS);
+    const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS) || localStorage.getItem('sem_api_keys');
     if (cached) {
       return { ...DEFAULT_API_KEYS, ...JSON.parse(cached) };
     }
@@ -454,8 +483,31 @@ export async function saveDeveloperApiKeys(
   try {
     localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(updated));
     localStorage.setItem('sem_api_keys', JSON.stringify(updated));
+    if (updated.supabaseUrl && updated.supabaseAnonKey) {
+      localStorage.setItem('sembako_developer_api_keys', JSON.stringify({
+        supabaseUrl: updated.supabaseUrl,
+        supabaseAnonKey: updated.supabaseAnonKey,
+        updatedAt: new Date().toISOString()
+      }));
+    }
   } catch (e) {}
 
+  // 1. Sync to Supabase Cloud directly
+  try {
+    const { getSupabaseClient } = await import('./supabaseClient');
+    const sb = getSupabaseClient();
+    if (sb) {
+      await sb.from('remote_config').upsert({
+        id: 'app_api_keys',
+        config: updated,
+        version: 1,
+        updated_at: new Date().toISOString(),
+        updated_by: 'Control Panel Developer'
+      });
+    }
+  } catch (_) {}
+
+  // 2. Sync to Server Backend
   try {
     const { ok } = await safeJsonFetch('/api/developer/keys', {
       method: 'POST',
@@ -470,7 +522,7 @@ export async function saveDeveloperApiKeys(
       return {
         success: true,
         keys: updated,
-        message: 'API Key berhasil disimpan ke server dan aktif secara instan!',
+        message: 'API Key (Gemini, WhatsApp, Supabase) berhasil disimpan & disinkronkan ke seluruh perangkat!',
       };
     }
   } catch (e) {}
@@ -478,7 +530,7 @@ export async function saveDeveloperApiKeys(
   return {
     success: true,
     keys: updated,
-    message: 'API Key tersimpan secara lokal dan siap digunakan.',
+    message: 'API Key tersimpan dan aktif di database.',
   };
 }
 

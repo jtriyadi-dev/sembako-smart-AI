@@ -41,23 +41,15 @@ export const RemoteConfigProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setConfig(cfg);
       setIsDevAuth(isDeveloperLoggedIn());
 
-      if (isDeveloperLoggedIn()) {
-        const keys = await fetchDeveloperApiKeys();
+      // Auto-fetch API Keys (Gemini, WhatsApp Gateway, Supabase) for all devices
+      const keys = await fetchDeveloperApiKeys();
+      if (keys) {
         setApiKeys(keys);
-      } else {
-        // Also run public Supabase auto-discovery for client / secondary devices
-        await initPublicSupabaseConfig();
-        try {
-          const rawDevKeys = localStorage.getItem('sembako_developer_api_keys');
-          const rawSemKeys = localStorage.getItem('sem_api_keys');
-          let combined = {};
-          if (rawDevKeys) combined = { ...combined, ...JSON.parse(rawDevKeys) };
-          if (rawSemKeys) combined = { ...combined, ...JSON.parse(rawSemKeys) };
-          if (Object.keys(combined).length > 0) {
-            setApiKeys(prev => ({ ...prev, ...combined }));
-          }
-        } catch (_) {}
       }
+
+      // Also run public Supabase auto-discovery for client / secondary devices
+      await initPublicSupabaseConfig();
+      
       setLastSyncedAt(new Date());
     } catch (err) {
       console.warn('[RemoteConfigProvider] Initial load fallback:', err);
@@ -70,7 +62,7 @@ export const RemoteConfigProvider: React.FC<{ children: React.ReactNode }> = ({ 
     loadInitialData();
   }, [loadInitialData]);
 
-  // Real-time Background Poller (every 4 seconds) to ensure changes propagate instantly to all users
+  // Real-time Background Poller (every 4 seconds) to ensure changes propagate instantly to all users & devices
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -80,13 +72,19 @@ export const RemoteConfigProvider: React.FC<{ children: React.ReactNode }> = ({ 
           setConfig(remote);
           setLastSyncedAt(new Date());
         }
+
+        // Check if API keys updated on other devices
+        const latestKeys = await fetchDeveloperApiKeys();
+        if (latestKeys && latestKeys.updatedAt !== apiKeys.updatedAt) {
+          setApiKeys(latestKeys);
+        }
       } catch (e) {
         // silent
       }
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [config.version]);
+  }, [config.version, apiKeys.updatedAt]);
 
   const updateConfig = async (partial: Partial<RemoteAppConfig>): Promise<boolean> => {
     try {
