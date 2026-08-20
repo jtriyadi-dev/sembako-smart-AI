@@ -6,6 +6,7 @@ import {
   fetchCrmUsers,
   saveCrmUser,
   deleteCrmUser,
+  syncAllCrmUsersToSupabase,
   testGeminiApiKey,
   testWhatsAppGateway,
   testSupabaseGateway,
@@ -101,6 +102,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<Partial<CrmUser> | null>(null);
   const [showUserPassword, setShowUserPassword] = useState(false);
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
 
   // API Keys Local Form State
   const [geminiKeyInput, setGeminiKeyInput] = useState(apiKeys.geminiApiKey || '');
@@ -282,6 +284,24 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       }
     } catch (err: any) {
       error('Gagal Menyimpan', err.message);
+    }
+  };
+
+  // Handle Bulk Sync CRM Users to Supabase
+  const handleSyncAllToSupabase = async () => {
+    setIsSyncingSupabase(true);
+    try {
+      const res = await syncAllCrmUsersToSupabase();
+      if (res.success) {
+        success('Sinkronisasi Supabase Berhasil', res.message);
+      } else {
+        error('Sinkronisasi Supabase', res.message);
+      }
+      await loadUsersList();
+    } catch (err: any) {
+      error('Gagal Sinkronisasi', err.message || 'Terjadi kesalahan saat menghubungkan ke Supabase');
+    } finally {
+      setIsSyncingSupabase(false);
     }
   };
 
@@ -901,6 +921,17 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                 <option value="suspended">Suspended / Beku</option>
                 <option value="expired">Expired</option>
               </select>
+
+              <button
+                type="button"
+                onClick={handleSyncAllToSupabase}
+                disabled={isSyncingSupabase}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+                title="Kirim dan sinkronkan seluruh data akun pelanggan CRM ke database Supabase Cloud sekarang"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-500 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
+                <span>{isSyncingSupabase ? 'Sinkronisasi...' : '⚡ Sinkronkan ke Supabase'}</span>
+              </button>
 
               <button
                 onClick={() => {

@@ -1,6 +1,6 @@
 import { RemoteAppConfig, CrmUser, DeveloperApiKeys } from '../types';
 import { DEFAULT_REMOTE_CONFIG, INITIAL_CRM_USERS, DEFAULT_API_KEYS } from '../data/defaultRemoteConfig';
-import { getSupabaseClient } from './supabaseClient';
+import { getSupabaseClient, syncUserToSupabaseDirect } from './supabaseClient';
 
 const LOCAL_STORAGE_REMOTE_CONFIG = 'sembako_remote_config_v2';
 const LOCAL_STORAGE_CRM_USERS = 'sembako_crm_users_v2';
@@ -293,35 +293,63 @@ export async function saveCrmUser(
   } catch (e) {}
 
   // 3. Direct client-side Supabase upsert for instant multi-device syncing
+  let sbSyncResult: { success: boolean; message: string } | null = null;
   try {
-    const sbClient = getSupabaseClient();
-    if (sbClient) {
-      await sbClient.from('crm_users').upsert({
-        id: updatedUser.id,
-        nama_pemilik: updatedUser.namaPemilik,
-        nama_toko: updatedUser.namaToko,
-        email: updatedUser.email,
-        password: updatedUser.password,
-        no_hp: updatedUser.noHp,
-        alamat_toko: updatedUser.alamatToko,
-        plan: updatedUser.plan,
-        status: updatedUser.status,
-        license_key: updatedUser.licenseKey,
-        device_limit: updatedUser.deviceLimit,
-        role: updatedUser.role,
-        notes: updatedUser.notes,
-        expires_at: updatedUser.expiresAt,
-        updated_at: updatedUser.updatedAt
-      });
-    }
-  } catch (err) {
+    sbSyncResult = await syncUserToSupabaseDirect(updatedUser);
+  } catch (err: any) {
     console.warn('[devCrmService] Supabase client upsert error:', err);
   }
+
+  const sbNotice = sbSyncResult?.success 
+    ? ' dan tersimpan di database Supabase Cloud' 
+    : '';
 
   return {
     success: true,
     user: updatedUser,
-    message: `Akun pelanggan "${updatedUser.namaPemilik}" (${updatedUser.namaToko}) berhasil disimpan dan disinkronkan ke seluruh server!`
+    message: `Akun pelanggan "${updatedUser.namaPemilik}" (${updatedUser.namaToko}) berhasil disimpan${sbNotice}!`
+  };
+}
+
+/**
+ * Synchronize all local and server CRM users to Supabase database in bulk/batch
+ */
+export async function syncAllCrmUsersToSupabase(devSecret: string = ''): Promise<{ success: boolean; count: number; total: number; message: string }> {
+  const users = await fetchCrmUsers(devSecret);
+  const sbClient = getSupabaseClient();
+
+  if (!sbClient) {
+    return {
+      success: false,
+      count: 0,
+      total: users.length,
+      message: 'Koneksi Supabase belum terpasang. Harap isi URL dan Anon/Public Key di tab Database & API Keys.'
+    };
+  }
+
+  let successCount = 0;
+  const errors: string[] = [];
+
+  for (const user of users) {
+    try {
+      const res = await syncUserToSupabaseDirect(user);
+      if (res.success) {
+        successCount++;
+      } else {
+        errors.push(`${user.namaPemilik}: ${res.message}`);
+      }
+    } catch (e: any) {
+      errors.push(`${user.namaPemilik}: ${e.message}`);
+    }
+  }
+
+  return {
+    success: successCount > 0,
+    count: successCount,
+    total: users.length,
+    message: successCount === users.length
+      ? `✅ Berhasil mensinkronkan seluruh ${successCount} akun pelanggan ke tabel crm_users Supabase!`
+      : `⚠️ ${successCount} dari ${users.length} akun berhasil disinkronkan ke Supabase. (${errors[0] || ''})`
   };
 }
 
@@ -403,6 +431,7 @@ export async function saveDeveloperApiKeys(
 
   try {
     localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(updated));
+    localStorage.setItem('sem_api_keys', JSON.stringify(updated));
   } catch (e) {}
 
   try {

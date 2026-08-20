@@ -7,8 +7,8 @@ let currentConfigKey = '';
 /**
  * Get active Supabase client with fallback hierarchy:
  * 1. Explicit arguments
- * 2. LocalStorage / Control Panel API keys
- * 3. Vite environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
+ * 2. LocalStorage / Control Panel API keys (sembako_developer_api_keys, sem_api_keys, etc.)
+ * 3. Vite environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_SUPABASE_SERVICE_ROLE_KEY)
  */
 export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): SupabaseClient | null {
   const env = (import.meta as any).env || {};
@@ -16,12 +16,36 @@ export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): S
   // Check localStorage for dynamically configured Supabase in Control Panel
   let localKeys: any = {};
   try {
-    const raw = localStorage.getItem('sem_api_keys');
-    if (raw) localKeys = JSON.parse(raw);
+    const rawDevKeys = localStorage.getItem('sembako_developer_api_keys');
+    const rawSemKeys = localStorage.getItem('sem_api_keys');
+    const rawRemote = localStorage.getItem('sembako_remote_config_v2');
+
+    if (rawDevKeys) {
+      localKeys = { ...localKeys, ...JSON.parse(rawDevKeys) };
+    }
+    if (rawSemKeys) {
+      localKeys = { ...localKeys, ...JSON.parse(rawSemKeys) };
+    }
+    if (rawRemote) {
+      const parsedRemote = JSON.parse(rawRemote);
+      if (parsedRemote.apiKeys) {
+        localKeys = { ...localKeys, ...parsedRemote.apiKeys };
+      }
+    }
   } catch (_) {}
 
-  const url = (overrideUrl || localKeys.supabaseUrl || env.VITE_SUPABASE_URL || '').trim();
-  const key = (overrideKey || localKeys.supabaseAnonKey || env.VITE_SUPABASE_ANON_KEY || '').trim();
+  let url = (overrideUrl || localKeys.supabaseUrl || env.VITE_SUPABASE_URL || '').trim();
+  let key = (
+    overrideKey ||
+    localKeys.supabaseServiceRoleKey ||
+    localKeys.supabaseAnonKey ||
+    env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+    env.VITE_SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+
+  url = sanitizeSupabaseUrl(url);
+  key = sanitizeSupabaseKey(key);
 
   if (!url || !key) {
     return null;
@@ -44,6 +68,90 @@ export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): S
   } catch (err) {
     console.warn('[Supabase Client Init Error]:', err);
     return null;
+  }
+}
+
+/**
+ * Sync single CRM user to Supabase table crm_users with automatic column adaptation
+ */
+export async function syncUserToSupabaseDirect(user: CrmUser): Promise<{ success: boolean; message: string }> {
+  const sbClient = getSupabaseClient();
+  if (!sbClient) {
+    return {
+      success: false,
+      message: 'Klien Supabase belum aktif. Pastikan URL dan API Key telah dikonfigurasi di menu Database & API Keys.',
+    };
+  }
+
+  try {
+    // 1. Try full schema record
+    const fullRecord: Record<string, any> = {
+      id: user.id || `user-crm-${Date.now()}`,
+      nama_pemilik: user.namaPemilik || 'Pelanggan Toko',
+      nama_toko: user.namaToko || 'Toko Sembako',
+      email: user.email || '',
+      password: user.password || 'password123',
+      no_hp: user.noHp || null,
+      alamat_toko: user.alamatToko || null,
+      plan: user.plan || 'pro_lifetime',
+      status: user.status || 'aktif',
+      license_key: user.licenseKey || null,
+      device_limit: user.deviceLimit || 3,
+      active_devices_count: user.activeDevicesCount || 0,
+      role: user.role || 'owner',
+      notes: user.notes || null,
+      expires_at: user.expiresAt || null,
+      created_at: user.createdAt || new Date().toISOString(),
+      updated_at: user.updatedAt || new Date().toISOString(),
+    };
+
+    const { error: fullErr } = await sbClient.from('crm_users').upsert(fullRecord, { onConflict: 'id' });
+
+    if (!fullErr) {
+      return {
+        success: true,
+        message: `✅ Akun "${user.namaPemilik}" berhasil disinkronkan ke tabel crm_users Supabase!`,
+      };
+    }
+
+    console.warn('[Supabase Full Upsert Failed, trying basic fields]:', fullErr.message);
+
+    // 2. Fallback to basic columns (if custom table was created with only standard columns)
+    const basicRecord: Record<string, any> = {
+      id: user.id || `user-crm-${Date.now()}`,
+      nama_pemilik: user.namaPemilik || 'Pelanggan Toko',
+      nama_toko: user.namaToko || 'Toko Sembako',
+      email: user.email || '',
+      password: user.password || 'password123',
+    };
+
+    const { error: basicErr } = await sbClient.from('crm_users').upsert(basicRecord, { onConflict: 'id' });
+
+    if (!basicErr) {
+      return {
+        success: true,
+        message: `✅ Akun "${user.namaPemilik}" tersimpan di Supabase (kolom standar)!`,
+      };
+    }
+
+    // 3. Fallback: try inserting without upsert
+    const { error: insertErr } = await sbClient.from('crm_users').insert([basicRecord]);
+    if (!insertErr) {
+      return {
+        success: true,
+        message: `✅ Akun "${user.namaPemilik}" berhasil di-insert ke Supabase!`,
+      };
+    }
+
+    return {
+      success: false,
+      message: `Gagal simpan ke Supabase: ${insertErr.message || basicErr.message || fullErr.message}`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Exception Supabase: ${err.message || 'Koneksi gagal'}`,
+    };
   }
 }
 

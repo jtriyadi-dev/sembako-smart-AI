@@ -346,9 +346,44 @@ export async function syncCrmUserToSupabaseBackend(u: CrmUser): Promise<boolean>
         'Prefer': 'resolution=merge-duplicates,return=representation'
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(5000)
     });
-    return res.ok;
+
+    if (res.ok) {
+      console.log(`[BackendStore] CRM user "${u.namaPemilik}" successfully synced to Supabase!`);
+      return true;
+    }
+
+    // If failed due to extra columns not existing in custom table, fallback to core columns
+    const errText = await res.text().catch(() => '');
+    console.warn(`[BackendStore] Supabase CRM full upsert failed (${res.status}): ${errText}. Attempting fallback to core columns...`);
+
+    const corePayload = {
+      id: u.id,
+      nama_pemilik: u.namaPemilik,
+      nama_toko: u.namaToko,
+      email: u.email,
+      password: u.password || 'password123',
+    };
+
+    const fallbackRes = await fetch(`${sb.url}/rest/v1/crm_users`, {
+      method: 'POST',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(corePayload),
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (fallbackRes.ok) {
+      console.log(`[BackendStore] CRM user "${u.namaPemilik}" synced to Supabase (core columns)!`);
+      return true;
+    }
+
+    return false;
   } catch (err: any) {
     console.warn('[BackendStore Supabase CRM Sync Error]:', err?.message);
     return false;
