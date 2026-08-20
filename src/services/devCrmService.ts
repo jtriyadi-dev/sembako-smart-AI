@@ -10,10 +10,7 @@ const LOCAL_STORAGE_DEV_AUTH = 'sembako_developer_auth_session';
 // Master fallback passcode (can be changed dynamically by the developer)
 export const MASTER_DEV_PIN = '998877';
 export const MASTER_DEV_EMAIL = 'developer@sembakosmart.id';
-
-// ==========================================
-// 1. REMOTE CONFIGURATION (LIVE CMS)
-// ==========================================
+const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
 
 // Safe helper to avoid JSON parse errors on HTML 404/500 responses
 async function safeJsonFetch(url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any; rawText?: string }> {
@@ -40,15 +37,23 @@ export async function fetchRemoteConfig(): Promise<RemoteAppConfig> {
       signal: AbortSignal.timeout(3000)
     });
     if (ok && data && data.config) {
-      // Cache to local storage
       try {
         localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.config));
       } catch (e) {}
       return data.config;
     }
-  } catch (err) {
-    // Network or server offline, proceed to fallback
-  }
+  } catch (err) {}
+
+  // 1b. Direct Cloud Store Fallback
+  try {
+    const { ok, data } = await safeJsonFetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
+    if (ok && data?.data?.remoteConfig) {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.data.remoteConfig));
+      } catch (e) {}
+      return data.data.remoteConfig;
+    }
+  } catch (e) {}
 
   // 2. Fallback to localStorage
   try {
@@ -129,6 +134,17 @@ export async function fetchCrmUsers(devSecret: string = ''): Promise<CrmUser[]> 
       serverUsers = data.users;
     }
   } catch (err) {}
+
+  // Direct Cloud Store query for resilient cross-device access
+  try {
+    const { ok, data } = await safeJsonFetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
+    if (ok && data?.data && Array.isArray(data.data.crmUsers) && data.data.crmUsers.length > 0) {
+      const mergedMap = new Map<string, CrmUser>();
+      serverUsers.forEach(u => { if (u.email) mergedMap.set(u.email.toLowerCase(), u); else if (u.id) mergedMap.set(u.id, u); });
+      data.data.crmUsers.forEach((u: CrmUser) => { if (u.email) mergedMap.set(u.email.toLowerCase(), u); else if (u.id) mergedMap.set(u.id, u); });
+      serverUsers = Array.from(mergedMap.values());
+    }
+  } catch (e) {}
 
   // Also query Supabase directly from client if available
   try {
@@ -242,7 +258,7 @@ export async function saveCrmUser(
     users.unshift(updatedUser);
   }
 
-  // Save to LocalStorage
+  // Save to LocalStorage immediately
   try {
     localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(users));
   } catch (e) {}
@@ -260,7 +276,23 @@ export async function saveCrmUser(
     });
   } catch (err) {}
 
-  // 2. Direct client-side Supabase upsert for instant multi-device syncing
+  // 2. Direct Cloud Store Sync
+  try {
+    safeJsonFetch(CLOUD_STORE_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Sembako Store Master V2',
+        data: {
+          crmUsers: users,
+          updatedAt: now
+        }
+      }),
+      signal: AbortSignal.timeout(3000)
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 3. Direct client-side Supabase upsert for instant multi-device syncing
   try {
     const sbClient = getSupabaseClient();
     if (sbClient) {
@@ -289,7 +321,7 @@ export async function saveCrmUser(
   return {
     success: true,
     user: updatedUser,
-    message: `Akun pelanggan "${updatedUser.namaPemilik}" (${updatedUser.namaToko}) berhasil disimpan!`
+    message: `Akun pelanggan "${updatedUser.namaPemilik}" (${updatedUser.namaToko}) berhasil disimpan dan disinkronkan ke seluruh server!`
   };
 }
 

@@ -265,8 +265,15 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       return;
     }
 
+    const payload = {
+      ...editingUser,
+      email: (editingUser.email || '').trim(),
+      noHp: (editingUser.noHp || '').trim(),
+      password: (editingUser.password || '').trim() || 'password123',
+    };
+
     try {
-      const res = await saveCrmUser(editingUser);
+      const res = await saveCrmUser(payload, 'master-dev-token');
       if (res.success) {
         success('Akun Berhasil Disimpan', res.message);
         setIsUserModalOpen(false);
