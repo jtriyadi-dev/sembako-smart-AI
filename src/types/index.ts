@@ -17,8 +17,28 @@ export type ThemeMode = 'light' | 'dark';
 
 export type UserRole = 'developer' | 'owner' | 'admin' | 'kasir';
 
+export interface StoreProfile {
+  id: string; // store_id
+  namaToko: string;
+  alamatToko?: string;
+  noHp?: string;
+  ownerUid?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface StoreMember {
+  id: string;
+  userId: string;
+  storeId: string;
+  role: UserRole;
+  status: 'aktif' | 'nonaktif';
+  createdAt?: string;
+}
+
 export interface StaffAccount {
   id: string;
+  storeId?: string;
   username: string; // e.g. 'kasir1', 'admin_toko'
   nama: string; // e.g. 'Siti Rahma'
   password?: string; // e.g. '123456'
@@ -38,6 +58,7 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   role?: UserRole;
+  storeId?: string;
   namaToko?: string;
   alamatToko?: string;
   noHp?: string;
@@ -55,6 +76,7 @@ export interface ToastMessage {
 
 export interface SupplierItem {
   id: string;
+  storeId?: string;
   kodeSupplier: string; // e.g. SUP-001
   namaSupplier: string; // e.g. PT Sumber Sembako Nusantara
   kontakPerson?: string; // e.g. Pak Budi / Bu Rina
@@ -70,6 +92,7 @@ export interface SupplierItem {
 
 export interface ProdukItem {
   id: string;
+  storeId?: string;
   kode: string; // SKU
   barcode?: string; // Barcode EAN-13 / Custom
   nama: string;
@@ -94,6 +117,7 @@ export type MovementType = 'masuk' | 'keluar' | 'penyesuaian' | 'opname';
 
 export interface StockMovement {
   id: string;
+  storeId?: string;
   produkId: string;
   namaProduk: string;
   kodeProduk: string;
@@ -112,6 +136,7 @@ export interface StockMovement {
 
 export interface StockOpname {
   id: string;
+  storeId?: string;
   tanggal: string;
   produkId: string;
   namaProduk: string;
@@ -167,6 +192,7 @@ export interface RiwayatReturItem {
 
 export interface TransaksiItem {
   id: string;
+  storeId?: string;
   kodeTransaksi: string;
   tanggal: string;
   items: TransaksiDetailItem[];
@@ -208,6 +234,7 @@ export type CrmUserStatus = 'aktif' | 'suspended' | 'expired' | 'pending';
 
 export interface CrmUser {
   id: string;
+  storeId?: string;
   namaPemilik: string;
   namaToko: string;
   email: string;

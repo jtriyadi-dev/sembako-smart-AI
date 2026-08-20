@@ -5,7 +5,7 @@ import { UserProfile } from '../types';
 import { resetDatabaseToInitialState } from '../services/productService';
 import { findStaffByCredentials, updateStaffLastLogin } from '../services/staffService';
 import { INITIAL_CRM_USERS } from '../data/defaultRemoteConfig';
-import { getSupabaseClient } from '../services/supabaseClient';
+import { getSupabaseClient, getEffectiveStoreId, setCurrentStoreId } from '../services/supabaseClient';
 
 export interface DemoSession {
   isDemo: boolean;
@@ -85,6 +85,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
   }, []);
+
+  // Sync Store ID to Supabase Multi-Tenancy Key whenever Profile changes
+  useEffect(() => {
+    if (profile) {
+      const computedStoreId = getEffectiveStoreId(profile);
+      setCurrentStoreId(computedStoreId);
+    }
+  }, [profile]);
 
   // Background Pre-Sync CRM users and Staff accounts from server
   useEffect(() => {

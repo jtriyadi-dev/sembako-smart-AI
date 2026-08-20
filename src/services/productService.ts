@@ -15,7 +15,12 @@ import {
 import { onSnapshot } from 'firebase/firestore';
 import { ProdukItem } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
-import { getSupabaseClient } from './supabaseClient';
+import { 
+  getSupabaseClient, 
+  getCurrentStoreId, 
+  subscribeRealtimeTable, 
+  logSupabase 
+} from './supabaseClient';
 
 export enum OperationType {
   CREATE = 'create',
@@ -51,305 +56,339 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 // Helper to ensure every product object has non-null/non-undefined required properties
-function sanitizeProduct(p: any, idx: number = 0): ProdukItem {
+export function sanitizeProduct(p: any, idx: number = 0): ProdukItem {
   const id = String(p?.id || `prod-${Date.now()}-${idx}`);
   const kodeStr = p?.kode ? String(p.kode) : `SKU-${id.substring(0, 5).toUpperCase()}`;
   return {
     id,
+    storeId: p?.storeId || p?.store_id || getCurrentStoreId(),
     kode: kodeStr,
     barcode: p?.barcode ? String(p.barcode) : '',
     nama: p?.nama ? String(p.nama) : 'Produk Sembako',
     kategori: p?.kategori ? String(p.kategori) : 'Sembako Utama',
-    hargaBeli: Number(p?.hargaBeli) || 0,
-    hargaJual: Number(p?.hargaJual) || 0,
+    hargaBeli: Number(p?.hargaBeli ?? p?.harga_beli) || 0,
+    hargaJual: Number(p?.hargaJual ?? p?.harga_jual) || 0,
     stok: Number(p?.stok) || 0,
-    minStok: Number(p?.minStok) || 5,
+    minStok: Number(p?.minStok ?? p?.min_stok) || 5,
     satuan: p?.satuan ? String(p.satuan) : 'Pcs',
-    gambarUrl: p?.gambarUrl ? String(p.gambarUrl) : '',
+    gambarUrl: p?.gambarUrl ?? p?.gambar_url ?? '',
     deskripsi: p?.deskripsi ? String(p.deskripsi) : '',
-    expiredDate: p?.expiredDate ? String(p.expiredDate) : '',
-    batchNo: p?.batchNo ? String(p.batchNo) : '',
+    expiredDate: p?.expiredDate ?? p?.expired_date ?? '',
+    batchNo: p?.batchNo ?? p?.batch_no ?? '',
+    supplierNama: p?.supplierNama ?? p?.supplier ?? '',
     terjual: Number(p?.terjual) || 0,
-    createdAt: p?.createdAt ? String(p.createdAt) : new Date().toISOString(),
-    updatedAt: p?.updatedAt ? String(p.updatedAt) : new Date().toISOString(),
+    createdAt: p?.createdAt ?? p?.created_at ?? new Date().toISOString(),
+    updatedAt: p?.updatedAt ?? p?.updated_at ?? new Date().toISOString(),
   };
 }
 
-// Fast direct REST API fetch for instant (<100ms) product loading from Express Server + Cloud Store
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
 
-async function fetchProductsDirectRest(): Promise<ProdukItem[]> {
-  try {
-    // 1. Try Supabase Client directly first
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const mapped: ProdukItem[] = data.map((r: any) => sanitizeProduct({
-            id: String(r.id),
-            kode: r.kode || `SKU-${String(r.id).substring(0, 5).toUpperCase()}`,
-            barcode: r.barcode || '',
-            nama: r.nama || 'Produk Sembako',
-            kategori: r.kategori || 'Sembako Utama',
-            hargaBeli: Number(r.harga_beli) || 0,
-            hargaJual: Number(r.harga_jual) || 0,
-            stok: Number(r.stok) || 0,
-            minStok: Number(r.min_stok) || 5,
-            satuan: r.satuan || 'Pcs',
-            gambarUrl: r.gambar_url || '',
-            deskripsi: r.deskripsi || '',
-            expiredDate: r.expired_date || '',
-            batchNo: r.batch_no || '',
-            terjual: Number(r.terjual) || 0,
-            createdAt: r.created_at || new Date().toISOString(),
-            updatedAt: r.updated_at || new Date().toISOString(),
-          }));
-          try {
-            localStorage.setItem('sembako_cached_products', JSON.stringify(mapped));
-          } catch (e) {}
-          return mapped;
-        }
-      } catch (e) {
-        console.warn('[ProductService Supabase Fetch Error]:', e);
-      }
-    }
+/**
+ * Fetch products from Supabase (Source of Truth) with fallback hierarchy
+ */
+export const fetchProductsDirect = fetchProductsDirectRest;
 
-    // 2. Try local Express API endpoint (which also proxies Supabase)
+export async function fetchProductsDirectRest(overrideStoreId?: string): Promise<ProdukItem[]> {
+  const storeId = overrideStoreId || getCurrentStoreId();
+
+  // 1. PRIMARY SOURCE OF TRUTH: Supabase Database
+  const supabase = getSupabaseClient();
+  if (supabase) {
     try {
-      const serverRes = await fetch('/api/products');
-      if (serverRes.ok) {
-        const data = await serverRes.json();
-        if (data.products && Array.isArray(data.products) && data.products.length > 0) {
-          const cleanProds = data.products.map(sanitizeProduct);
-          try {
-            localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
-          } catch (e) {}
-          return cleanProds;
-        }
+      logSupabase('query', `Mengambil data produk untuk Store ID: "${storeId}"...`);
+      
+      let queryBuilder = supabase.from('products').select('*');
+      
+      // Multi-tenant store filter: match store_id or default_store or unassigned rows
+      if (storeId && storeId !== 'all') {
+        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
       }
-    } catch (e) {
-      // ignore if local API unavailable
+
+      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+
+      if (error) {
+        logSupabase('error', `Gagal fetch produk dari Supabase: ${error.message} (Code: ${error.code})`, error);
+      } else if (Array.isArray(data)) {
+        logSupabase('query', `Produk berhasil dimuat dari Supabase: ${data.length} item ditemukan (Store: ${storeId})`);
+        
+        const mapped: ProdukItem[] = data.map((r: any) => sanitizeProduct({
+          id: String(r.id),
+          storeId: r.store_id || storeId,
+          kode: r.kode || `SKU-${String(r.id).substring(0, 5).toUpperCase()}`,
+          barcode: r.barcode || '',
+          nama: r.nama || 'Produk Sembako',
+          kategori: r.kategori || 'Sembako Utama',
+          hargaBeli: Number(r.harga_beli) || 0,
+          hargaJual: Number(r.harga_jual) || 0,
+          stok: Number(r.stok) || 0,
+          minStok: Number(r.min_stok) || 5,
+          satuan: r.satuan || 'Pcs',
+          gambarUrl: r.gambar_url || '',
+          deskripsi: r.deskripsi || '',
+          expiredDate: r.expired_date || '',
+          batchNo: r.batch_no || '',
+          supplierNama: r.supplier || '',
+          terjual: Number(r.terjual) || 0,
+          createdAt: r.created_at || new Date().toISOString(),
+          updatedAt: r.updated_at || new Date().toISOString(),
+        }));
+
+        // Always update cache with fresh Supabase data
+        try {
+          localStorage.setItem('sembako_cached_products', JSON.stringify(mapped));
+        } catch (e) {}
+
+        return mapped;
+      }
+    } catch (e: any) {
+      logSupabase('error', 'Exception fetch produk Supabase', e);
     }
-
-    // 3. Try Cloud Store Sync Object
-    try {
-      const cloudRes = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
-      if (cloudRes.ok) {
-        const cloudJson = await cloudRes.json();
-        const prods = cloudJson?.data?.products;
-        if (Array.isArray(prods) && prods.length > 0) {
-          const cleanProds = prods.map(sanitizeProduct);
-          try {
-            localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
-          } catch (e) {}
-          return cleanProds;
-        }
-      }
-    } catch (e) {
-      // ignore cloud store fetch error
-    }
-
-    // 4. Fallback to localStorage cache
-    try {
-      const cached = localStorage.getItem('sembako_cached_products');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(sanitizeProduct);
-        }
-      }
-    } catch (e) {}
-
-    // 5. Fallback to Firestore REST API
-    const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
-    const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?pageSize=300&key=${FIREBASE_API_KEY}`;
-    
-    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) return [];
-    
-    const data = await res.json();
-    const docs = data.documents || [];
-
-    const products: ProdukItem[] = docs.map((doc: any) => {
-      const id = doc.name ? doc.name.split('/').pop() : `prod-${Math.random()}`;
-      const f = doc.fields || {};
-
-      const parseVal = (field: any, defaultVal: any) => {
-        if (!field) return defaultVal;
-        if ('stringValue' in field) return field.stringValue;
-        if ('integerValue' in field) return parseInt(field.integerValue, 10);
-        if ('doubleValue' in field) return parseFloat(field.doubleValue);
-        if ('booleanValue' in field) return field.booleanValue;
-        return defaultVal;
-      };
-
-      return {
-        id,
-        kode: parseVal(f.kode, `SKU-${id.substring(0, 5).toUpperCase()}`),
-        barcode: parseVal(f.barcode, ''),
-        nama: parseVal(f.nama, 'Produk Sembako'),
-        kategori: parseVal(f.kategori, 'Lainnya'),
-        hargaBeli: Number(parseVal(f.hargaBeli, 0)) || 0,
-        hargaJual: Number(parseVal(f.hargaJual, 0)) || 0,
-        stok: Number(parseVal(f.stok, 0)) || 0,
-        minStok: Number(parseVal(f.minStok, 5)) || 5,
-        satuan: parseVal(f.satuan, 'Pcs'),
-        gambarUrl: parseVal(f.gambarUrl, ''),
-        deskripsi: parseVal(f.deskripsi, ''),
-        expiredDate: parseVal(f.expiredDate, ''),
-        batchNo: parseVal(f.batchNo, ''),
-        terjual: Number(parseVal(f.terjual, 0)) || 0,
-        createdAt: parseVal(f.createdAt, new Date().toISOString()),
-        updatedAt: parseVal(f.updatedAt, new Date().toISOString()),
-      };
-    });
-
-    return products;
-  } catch (err) {
-    console.warn('Fast REST fetch error:', err);
-    return [];
   }
-}
 
-// Subscribe to real-time products list with instant REST loading & fast polling
-export function subscribeProducts(
-  onData: (products: ProdukItem[]) => void,
-  onError?: (error: Error) => void
-) {
-  let isUnsubscribed = false;
-  let hasRestData = false;
+  // 2. Express Server API (Proxies backend database)
+  try {
+    const serverRes = await fetch('/api/products', { signal: AbortSignal.timeout(3000) });
+    if (serverRes.ok) {
+      const data = await serverRes.json();
+      if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+        const cleanProds = data.products.map(sanitizeProduct);
+        try {
+          localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
+        } catch (e) {}
+        return cleanProds;
+      }
+    }
+  } catch (e) {}
 
-  // 1. Instant Synchronous Cache Call (<10ms)
+  // 3. Cloud Store Sync Object (Cross-instance backup)
+  try {
+    const cloudRes = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(2500) });
+    if (cloudRes.ok) {
+      const cloudJson = await cloudRes.json();
+      const prods = cloudJson?.data?.products;
+      if (Array.isArray(prods) && prods.length > 0) {
+        const cleanProds = prods.map(sanitizeProduct);
+        try {
+          localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
+        } catch (e) {}
+        return cleanProds;
+      }
+    }
+  } catch (e) {}
+
+  // 4. LocalStorage Cache (Offline fallback only)
   try {
     const cached = localStorage.getItem('sembako_cached_products');
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        hasRestData = true;
+        return parsed.map(sanitizeProduct);
+      }
+    }
+  } catch (e) {}
+
+  // 5. Firestore REST API (Final fallback)
+  try {
+    const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
+    const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
+    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/products?pageSize=300&key=${FIREBASE_API_KEY}`;
+    
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const data = await res.json();
+      const docs = data.documents || [];
+      if (docs.length > 0) {
+        const parseVal = (field: any, defaultVal: any) => {
+          if (!field) return defaultVal;
+          if ('stringValue' in field) return field.stringValue;
+          if ('integerValue' in field) return parseInt(field.integerValue, 10);
+          if ('doubleValue' in field) return parseFloat(field.doubleValue);
+          if ('booleanValue' in field) return field.booleanValue;
+          return defaultVal;
+        };
+
+        return docs.map((doc: any) => {
+          const id = doc.name ? doc.name.split('/').pop() : `prod-${Math.random()}`;
+          const f = doc.fields || {};
+          return {
+            id,
+            storeId,
+            kode: parseVal(f.kode, `SKU-${id.substring(0, 5).toUpperCase()}`),
+            barcode: parseVal(f.barcode, ''),
+            nama: parseVal(f.nama, 'Produk Sembako'),
+            kategori: parseVal(f.kategori, 'Lainnya'),
+            hargaBeli: Number(parseVal(f.hargaBeli, 0)) || 0,
+            hargaJual: Number(parseVal(f.hargaJual, 0)) || 0,
+            stok: Number(parseVal(f.stok, 0)) || 0,
+            minStok: Number(parseVal(f.minStok, 5)) || 5,
+            satuan: parseVal(f.satuan, 'Pcs'),
+            gambarUrl: parseVal(f.gambarUrl, ''),
+            deskripsi: parseVal(f.deskripsi, ''),
+            expiredDate: parseVal(f.expiredDate, ''),
+            batchNo: parseVal(f.batchNo, ''),
+            terjual: Number(parseVal(f.terjual, 0)) || 0,
+            createdAt: parseVal(f.createdAt, new Date().toISOString()),
+            updatedAt: parseVal(f.updatedAt, new Date().toISOString()),
+          };
+        });
+      }
+    }
+  } catch (err) {}
+
+  return [];
+}
+
+/**
+ * Real-time Product Subscription
+ * 1. Emits cache immediately for fast render
+ * 2. Fetches fresh data from Supabase
+ * 3. Subscribes to Supabase Realtime channel for instant cross-device updates
+ * 4. Background safety poll
+ */
+export function subscribeProducts(
+  onData: (products: ProdukItem[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  let isUnsubscribed = false;
+  const storeId = getCurrentStoreId();
+
+  // 1. Instant Cache Call (<10ms)
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
         onData(parsed.map(sanitizeProduct));
       }
     }
   } catch (e) {}
 
-  // 2. Instant Supabase / REST Direct Fetch (<100ms)
-  fetchProductsDirectRest().then((restProducts) => {
-    if (!isUnsubscribed && restProducts.length > 0) {
-      hasRestData = true;
-      onData(restProducts);
+  // 2. Initial Fetch from Supabase (Source of Truth)
+  fetchProductsDirectRest(storeId).then((prods) => {
+    if (!isUnsubscribed && prods.length > 0) {
+      onData(prods);
     }
   });
 
-  // 3. High-speed 1.5s Polling (Ensures new products/stock from WhatsApp Webhook appear instantly)
+  // 3. Supabase Realtime Subscription (Instant Multi-Device Sync)
+  const unsubscribeRealtime = subscribeRealtimeTable('products', storeId, async () => {
+    if (isUnsubscribed) return;
+    logSupabase('realtime', 'Pembaruan produk terdeteksi via Realtime, memuat ulang data...');
+    const refreshed = await fetchProductsDirectRest(storeId);
+    if (!isUnsubscribed) {
+      onData(refreshed);
+    }
+  });
+
+  // 4. Background Safety Polling (Every 3.5s to catch webhooks or network reconnects)
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     try {
-      const items = await fetchProductsDirectRest();
+      const items = await fetchProductsDirectRest(storeId);
       if (!isUnsubscribed && items.length > 0) {
-        hasRestData = true;
         onData(items);
       }
     } catch (e) {}
-  }, 1500);
+  }, 3500);
 
-  // 4. Firestore JS SDK Realtime Listener (non-blocking fallback)
-  let unsubscribeSnap = () => {};
+  // 5. Firestore Fallback Listener
+  let unsubscribeFirestore = () => {};
   try {
     const productsRef = collection(db, COLLECTIONS.PRODUCTS);
     const q = query(productsRef);
-
-    unsubscribeSnap = onSnapshot(
+    unsubscribeFirestore = onSnapshot(
       q,
-      async (snapshot) => {
-        if (isUnsubscribed) return;
-        if (snapshot.empty) {
-          if (hasRestData) return;
-          const isDemo = Boolean(localStorage.getItem('sembako_demo_session'));
-          if (isDemo) {
-            const demoProducts: ProdukItem[] = INITIAL_PRODUCTS.map((item, idx) => ({
-              ...item,
-              id: `demo-prod-${idx + 1}`,
-            }));
-            onData(demoProducts);
-          }
-          return;
-        }
-
-        // Only use Firestore if we don't already have newer REST/Supabase data
-        const cachedRaw = localStorage.getItem('sembako_cached_products');
-        let currentCachedCount = 0;
-        if (cachedRaw) {
-          try { currentCachedCount = JSON.parse(cachedRaw).length; } catch (_) {}
-        }
-
-        if (snapshot.docs.length >= currentCachedCount) {
-          const products: ProdukItem[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              kode: data.kode || `SKU-${docSnap.id.substring(0, 5).toUpperCase()}`,
-              barcode: data.barcode || '',
-              nama: data.nama || 'Produk Sembako',
-              kategori: data.kategori || 'Lainnya',
-              hargaBeli: Number(data.hargaBeli) || 0,
-              hargaJual: Number(data.hargaJual) || 0,
-              stok: Number(data.stok) || 0,
-              minStok: Number(data.minStok) || 5,
-              satuan: data.satuan || 'Pcs',
-              gambarUrl: data.gambarUrl || '',
-              deskripsi: data.deskripsi || '',
-              expiredDate: data.expiredDate || '',
-              batchNo: data.batchNo || '',
-              terjual: Number(data.terjual) || 0,
-              createdAt: data.createdAt || new Date().toISOString(),
-              updatedAt: data.updatedAt || new Date().toISOString(),
-            };
-          });
-
-          hasRestData = true;
-          onData(products);
+      (snapshot) => {
+        if (isUnsubscribed || snapshot.empty) return;
+        // Only if not connected to Supabase
+        if (!getSupabaseClient()) {
+          const prods = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          })) as ProdukItem[];
+          onData(prods.map(sanitizeProduct));
         }
       },
-      (err) => {
-        console.warn('Firestore optional product subscription error:', err);
-      }
+      () => {}
     );
   } catch (e) {}
 
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
-    try {
-      unsubscribeSnap();
-    } catch (e) {}
+    try { unsubscribeRealtime(); } catch (_) {}
+    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
-// Seed sample products on demand
+/**
+ * Seed sample products on demand
+ */
 export async function seedSampleProducts(): Promise<void> {
-  const path = COLLECTIONS.PRODUCTS;
+  const storeId = getCurrentStoreId();
+  const supabase = getSupabaseClient();
+  const now = new Date().toISOString();
+
+  if (supabase) {
+    try {
+      const rows = INITIAL_PRODUCTS.map((p, idx) => ({
+        id: `prod-seed-${Date.now()}-${idx}`,
+        store_id: storeId,
+        kode: p.kode,
+        barcode: p.barcode || null,
+        nama: p.nama,
+        kategori: p.kategori,
+        harga_beli: p.hargaBeli,
+        harga_jual: p.hargaJual,
+        stok: p.stok,
+        min_stok: p.minStok,
+        satuan: p.satuan,
+        gambar_url: p.gambarUrl || null,
+        deskripsi: p.deskripsi || null,
+        expired_date: p.expiredDate || null,
+        batch_no: p.batchNo || null,
+        supplier: p.supplierNama || null,
+        terjual: p.terjual || 0,
+        created_at: now,
+        updated_at: now,
+      }));
+
+      const { error } = await supabase.from('products').upsert(rows, { onConflict: 'id' });
+      if (error) {
+        logSupabase('error', 'Gagal seed produk ke Supabase:', error);
+      } else {
+        logSupabase('sync', `Berhasil seed ${rows.length} produk contoh ke Supabase (Store: ${storeId})`);
+      }
+    } catch (e) {
+      logSupabase('error', 'Exception seed produk Supabase:', e);
+    }
+  }
+
+  // Also seed to Firestore
   try {
-    const productsRef = collection(db, path);
+    const productsRef = collection(db, COLLECTIONS.PRODUCTS);
     for (const item of INITIAL_PRODUCTS) {
       await addDoc(productsRef, item);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  } catch (error) {}
 }
 
-// Add new product to Supabase + Express + Firestore
+/**
+ * Add new product to Supabase (Source of Truth) + Express + Firestore
+ */
 export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<string> {
-  const path = COLLECTIONS.PRODUCTS;
   const now = new Date().toISOString();
   const id = `prod-${Date.now()}`;
+  const storeId = product.storeId || getCurrentStoreId();
+
   const cleanProduct: ProdukItem = {
     id,
+    storeId,
     kode: product.kode || `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
     barcode: product.barcode || '',
     nama: product.nama || 'Produk Sembako',
-    kategori: product.kategori || 'Lainnya',
+    kategori: product.kategori || 'Sembako Utama',
     hargaBeli: Number(product.hargaBeli) || 0,
     hargaJual: Number(product.hargaJual) || 0,
     stok: Number(product.stok) || 0,
@@ -359,17 +398,19 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     deskripsi: product.deskripsi || '',
     expiredDate: product.expiredDate || '',
     batchNo: product.batchNo || '',
+    supplierNama: product.supplierNama || '',
     terjual: Number(product.terjual) || 0,
     createdAt: now,
     updatedAt: now,
   };
 
-  // 1. Insert directly into Supabase (PostgreSQL) if connected
+  // 1. PRIMARY INSERT: Supabase PostgreSQL
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase.from('products').insert([{
+      const { error } = await supabase.from('products').upsert([{
         id: cleanProduct.id,
+        store_id: storeId,
         kode: cleanProduct.kode,
         barcode: cleanProduct.barcode || null,
         nama: cleanProduct.nama,
@@ -383,43 +424,57 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
         deskripsi: cleanProduct.deskripsi || null,
         expired_date: cleanProduct.expiredDate || null,
         batch_no: cleanProduct.batchNo || null,
+        supplier: cleanProduct.supplierNama || null,
         terjual: cleanProduct.terjual || 0,
         created_at: now,
         updated_at: now,
-      }]);
-    } catch (sbErr) {
-      console.warn('[Supabase Direct Add Product Error]:', sbErr);
+      }], { onConflict: 'id' });
+
+      if (error) {
+        logSupabase('error', `Gagal menambahkan produk ke Supabase: ${error.message}`, error);
+      } else {
+        logSupabase('sync', `Produk baru "${cleanProduct.nama}" (${cleanProduct.kode}) tersimpan di Supabase (Store: ${storeId})`);
+      }
+    } catch (sbErr: any) {
+      logSupabase('error', 'Exception addProduct Supabase:', sbErr);
     }
   }
 
-  // 2. Send POST to Express server (which also syncs backend stores)
+  // 2. Express Server Broadcast (which also syncs backend stores)
   try {
     await fetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cleanProduct)
+      body: JSON.stringify(cleanProduct),
+      signal: AbortSignal.timeout(3000)
     });
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
 
-  // 3. Add to Firestore if available
+  // 3. Firestore (optional secondary backup)
   try {
-    const productsRef = collection(db, path);
-    const docRef = await addDoc(productsRef, cleanProduct);
-    return docRef.id;
-  } catch (error) {
-    console.warn('Firestore optional addProduct skipped:', error);
-    return id;
-  }
+    const productsRef = collection(db, COLLECTIONS.PRODUCTS);
+    await addDoc(productsRef, cleanProduct);
+  } catch (error) {}
+
+  // Update local cache optimistically
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    const list = cached ? JSON.parse(cached) : [];
+    list.unshift(cleanProduct);
+    localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+  } catch (_) {}
+
+  return id;
 }
 
-// Update existing product in Supabase + Express + Firestore
+/**
+ * Update existing product in Supabase + Express + Firestore
+ */
 export async function updateProduct(id: string, product: Partial<ProdukItem>): Promise<void> {
-  const path = `${COLLECTIONS.PRODUCTS}/${id}`;
   const now = new Date().toISOString();
+  const storeId = product.storeId || getCurrentStoreId();
 
-  // 1. Update directly in Supabase (PostgreSQL) if connected
+  // 1. PRIMARY UPDATE: Supabase
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -437,16 +492,24 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
       if (product.deskripsi !== undefined) sbUpdate.deskripsi = product.deskripsi;
       if (product.expiredDate !== undefined) sbUpdate.expired_date = product.expiredDate;
       if (product.batchNo !== undefined) sbUpdate.batch_no = product.batchNo;
+      if (product.supplierNama !== undefined) sbUpdate.supplier = product.supplierNama;
       if (product.terjual !== undefined) sbUpdate.terjual = product.terjual;
-      await supabase.from('products').update(sbUpdate).eq('id', id);
-    } catch (sbErr) {
-      console.warn('[Supabase Direct Update Product Error]:', sbErr);
+      if (storeId) sbUpdate.store_id = storeId;
+
+      const { error } = await supabase.from('products').update(sbUpdate).eq('id', id);
+      if (error) {
+        logSupabase('error', `Gagal update produk ${id} di Supabase: ${error.message}`, error);
+      } else {
+        logSupabase('sync', `Produk ${id} berhasil diperbarui di Supabase (Stok: ${product.stok})`);
+      }
+    } catch (sbErr: any) {
+      logSupabase('error', 'Exception updateProduct Supabase:', sbErr);
     }
   }
 
-  // 2. Fetch current items and update via Express
+  // 2. Express API Update
   try {
-    const currentList = await fetchProductsDirectRest();
+    const currentList = await fetchProductsDirectRest(storeId);
     const existing = currentList.find(p => p.id === id);
     if (existing) {
       const updated: ProdukItem = {
@@ -457,14 +520,13 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
       await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated)
+        body: JSON.stringify(updated),
+        signal: AbortSignal.timeout(3000)
       });
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
 
-  // 3. Update Firestore if available
+  // 3. Firestore Update
   try {
     const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
     const updateData = {
@@ -475,90 +537,110 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
       (key) => (updateData as any)[key] === undefined && delete (updateData as any)[key]
     );
     await setDoc(productRef, updateData, { merge: true });
-  } catch (error) {
-    console.warn('Firestore optional updateProduct skipped:', error);
-  }
+  } catch (error) {}
+
+  // Update local cache
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    if (cached) {
+      const list = JSON.parse(cached);
+      const idx = list.findIndex((p: any) => p.id === id);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...product, updatedAt: now };
+        localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+      }
+    }
+  } catch (_) {}
 }
 
-// Delete product from Supabase & Firestore
+/**
+ * Delete product from Supabase & Firestore
+ */
 export async function deleteProduct(id: string): Promise<void> {
-  const path = `${COLLECTIONS.PRODUCTS}/${id}`;
+  const storeId = getCurrentStoreId();
 
-  // 1. Delete from Supabase if connected
+  // 1. PRIMARY DELETE: Supabase
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase.from('products').delete().eq('id', id);
-    } catch (sbErr) {
-      console.warn('[Supabase Direct Delete Product Error]:', sbErr);
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) {
+        logSupabase('error', `Gagal menghapus produk ${id} dari Supabase: ${error.message}`, error);
+      } else {
+        logSupabase('sync', `Produk ${id} berhasil dihapus dari Supabase`);
+      }
+    } catch (sbErr: any) {
+      logSupabase('error', 'Exception deleteProduct Supabase:', sbErr);
     }
   }
 
-  // 2. Delete from Firestore
+  // 2. Express Server Delete
+  try {
+    await fetch(`/api/products/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(3000) });
+  } catch (e) {}
+
+  // 3. Firestore Delete
   try {
     const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
     await deleteDoc(productRef);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
+  } catch (error) {}
+
+  // Update local cache
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    if (cached) {
+      const list = JSON.parse(cached).filter((p: any) => p.id !== id);
+      localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+    }
+  } catch (_) {}
 }
 
 /**
- * Reset all database collections & local state back to initial clean state
- * (Used for 6-hour demo expiration reset or manual reset)
- */
-/**
- * Wipe all database collections to completely clean state for fresh store input
+ * Wipe all database collections to clean state
  */
 export async function clearAllDatabaseData(): Promise<void> {
+  const storeId = getCurrentStoreId();
+  const supabase = getSupabaseClient();
+
+  if (supabase) {
+    try {
+      if (storeId && storeId !== 'all') {
+        await Promise.allSettled([
+          supabase.from('transactions').delete().eq('store_id', storeId),
+          supabase.from('products').delete().eq('store_id', storeId),
+          supabase.from('stock_movements').delete().eq('store_id', storeId),
+          supabase.from('stock_opnames').delete().eq('store_id', storeId),
+          supabase.from('suppliers').delete().eq('store_id', storeId),
+        ]);
+      }
+      logSupabase('sync', `Database data untuk store "${storeId}" berhasil di-reset.`);
+    } catch (e) {}
+  }
+
   try {
-    // 1. Delete all transactions
     const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
     const txSnap = await getDocs(txRef);
     for (const d of txSnap.docs) {
       await deleteDoc(d.ref);
     }
 
-    // 2. Delete all daily reports
-    const repRef = collection(db, COLLECTIONS.DAILY_REPORTS);
-    const repSnap = await getDocs(repRef);
-    for (const d of repSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-
-    // 3. Delete all stock movements
-    const moveRef = collection(db, COLLECTIONS.STOCK_MOVEMENTS);
-    const moveSnap = await getDocs(moveRef);
-    for (const d of moveSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-
-    // 4. Delete all stock opnames
-    const opnRef = collection(db, COLLECTIONS.STOCK_OPNAMES);
-    const opnSnap = await getDocs(opnRef);
-    for (const d of opnSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-
-    // 5. Delete all suppliers
-    const supRef = collection(db, COLLECTIONS.SUPPLIERS);
-    const supSnap = await getDocs(supRef);
-    for (const d of supSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-
-    // 6. Delete all products (leaving database 100% empty)
     const prodRef = collection(db, COLLECTIONS.PRODUCTS);
     const prodSnap = await getDocs(prodRef);
     for (const d of prodSnap.docs) {
       await deleteDoc(d.ref);
     }
-  } catch (err) {
-    console.warn('Clear database skipped or failed (offline/auth):', err);
-  }
+  } catch (e) {}
+
+  try {
+    localStorage.removeItem('sembako_cached_products');
+    localStorage.removeItem('sembako_cached_transactions');
+    localStorage.removeItem('sembako_cached_stock_movements');
+    localStorage.removeItem('sembako_cached_stock_opnames');
+    localStorage.removeItem('sembako_cached_suppliers');
+  } catch (e) {}
 }
 
 export async function resetDatabaseToInitialState(): Promise<void> {
-  return clearAllDatabaseData();
+  await clearAllDatabaseData();
+  await seedSampleProducts();
 }
-

@@ -4,32 +4,45 @@ import {
   collection, 
   doc, 
   addDoc, 
-  setDoc,
-  updateDoc, 
+  setDoc, 
   getDoc, 
   query 
 } from './firebase';
 import { onSnapshot } from 'firebase/firestore';
 import { StockMovement, StockOpname, MovementType, ProdukItem } from '../types';
 import { handleFirestoreError, OperationType } from './productService';
-import { getSupabaseClient } from './supabaseClient';
+import { 
+  getSupabaseClient, 
+  getCurrentStoreId, 
+  subscribeRealtimeTable, 
+  logSupabase 
+} from './supabaseClient';
 
 const CACHE_MOVEMENTS_KEY = 'sembako_cached_stock_movements';
 const CACHE_OPNAMES_KEY = 'sembako_cached_stock_opnames';
 
-export async function fetchStockMovementsDirect(): Promise<StockMovement[]> {
-  // 1. Try direct Supabase fetch
+export async function fetchStockMovementsDirect(overrideStoreId?: string): Promise<StockMovement[]> {
+  const storeId = overrideStoreId || getCurrentStoreId();
+
+  // 1. PRIMARY SOURCE OF TRUTH: Supabase Database
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
-        .from('stock_movements')
-        .select('*')
-        .order('created_at', { ascending: false });
+      logSupabase('query', `Mengambil mutasi stok untuk Store ID: "${storeId}"...`);
+      let queryBuilder = supabase.from('stock_movements').select('*');
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (storeId && storeId !== 'all') {
+        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
+      }
+
+      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+
+      if (error) {
+        logSupabase('error', `Gagal fetch mutasi stok dari Supabase: ${error.message}`, error);
+      } else if (Array.isArray(data)) {
         const movements: StockMovement[] = data.map((r: any) => ({
           id: String(r.id),
+          storeId: r.store_id || storeId,
           produkId: r.produk_id || '',
           namaProduk: r.nama_produk || 'Produk Sembako',
           kodeProduk: r.kode_produk || '',
@@ -44,13 +57,15 @@ export async function fetchStockMovementsDirect(): Promise<StockMovement[]> {
           createdAt: r.created_at || new Date().toISOString(),
           operator: r.operator || 'Admin',
         }));
+
         try {
           localStorage.setItem(CACHE_MOVEMENTS_KEY, JSON.stringify(movements));
         } catch (e) {}
+
         return movements;
       }
     } catch (sbErr) {
-      console.warn('[Supabase Stock Movements Fetch Error]:', sbErr);
+      logSupabase('error', 'Exception fetch mutasi stok Supabase:', sbErr);
     }
   }
 
@@ -68,18 +83,23 @@ export async function fetchStockMovementsDirect(): Promise<StockMovement[]> {
   return [];
 }
 
-export async function fetchStockOpnamesDirect(): Promise<StockOpname[]> {
+export async function fetchStockOpnamesDirect(overrideStoreId?: string): Promise<StockOpname[]> {
+  const storeId = overrideStoreId || getCurrentStoreId();
   const supabase = getSupabaseClient();
+
   if (supabase) {
     try {
-      const { data, error } = await supabase
-        .from('stock_opnames')
-        .select('*')
-        .order('created_at', { ascending: false });
+      let queryBuilder = supabase.from('stock_opnames').select('*');
+      if (storeId && storeId !== 'all') {
+        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
+      }
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
         const opnames: StockOpname[] = data.map((r: any) => ({
           id: String(r.id),
+          storeId: r.store_id || storeId,
           tanggal: r.tanggal || new Date().toISOString().split('T')[0],
           produkId: r.produk_id || '',
           namaProduk: r.nama_produk || '',
@@ -92,13 +112,15 @@ export async function fetchStockOpnamesDirect(): Promise<StockOpname[]> {
           createdAt: r.created_at || new Date().toISOString(),
           operator: r.operator || 'Admin',
         }));
+
         try {
           localStorage.setItem(CACHE_OPNAMES_KEY, JSON.stringify(opnames));
         } catch (e) {}
+
         return opnames;
       }
     } catch (sbErr) {
-      console.warn('[Supabase Stock Opnames Fetch Error]:', sbErr);
+      logSupabase('error', 'Exception fetch stock opname Supabase:', sbErr);
     }
   }
 
@@ -115,13 +137,15 @@ export async function fetchStockOpnamesDirect(): Promise<StockOpname[]> {
   return [];
 }
 
-// Subscribe to Realtime Stock Movements Log with instant Supabase loading
+/**
+ * Subscribe to Realtime Stock Movements Log with instant Supabase loading & real-time replication
+ */
 export function subscribeStockMovements(
   onData: (movements: StockMovement[]) => void,
   onError?: (error: Error) => void
-) {
+): () => void {
   let isUnsubscribed = false;
-  let hasEmitted = false;
+  const storeId = getCurrentStoreId();
 
   // 1. Instant cache
   try {
@@ -129,34 +153,40 @@ export function subscribeStockMovements(
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed)) {
-        hasEmitted = true;
         onData(parsed);
       }
     }
   } catch (e) {}
 
-  // 2. Fast Supabase fetch (<100ms)
-  fetchStockMovementsDirect().then((items) => {
+  // 2. Fetch from Supabase
+  fetchStockMovementsDirect(storeId).then((items) => {
     if (!isUnsubscribed) {
-      hasEmitted = true;
       onData(items);
     }
-  }).catch(() => {
-    if (!isUnsubscribed && !hasEmitted) onData([]);
   });
 
-  // 3. 3s Polling against Supabase
+  // 3. Supabase Realtime Subscription
+  const unsubscribeRealtime = subscribeRealtimeTable('stock_movements', storeId, async () => {
+    if (isUnsubscribed) return;
+    logSupabase('realtime', 'Mutasi stok baru terdeteksi via Realtime, memuat ulang...');
+    const refreshed = await fetchStockMovementsDirect(storeId);
+    if (!isUnsubscribed) {
+      onData(refreshed);
+    }
+  });
+
+  // 4. Polling fallback
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     try {
-      const items = await fetchStockMovementsDirect();
+      const items = await fetchStockMovementsDirect(storeId);
       if (!isUnsubscribed) {
         onData(items);
       }
     } catch (e) {}
-  }, 3000);
+  }, 3500);
 
-  // 4. Background Firestore listener (non-blocking)
+  // 5. Firestore listener
   let unsubscribeFirestore = () => {};
   try {
     const movementsRef = collection(db, COLLECTIONS.STOCK_MOVEMENTS);
@@ -164,61 +194,60 @@ export function subscribeStockMovements(
     unsubscribeFirestore = onSnapshot(
       q,
       (snapshot) => {
-        if (isUnsubscribed) return;
-        if (snapshot.empty) {
-          if (!hasEmitted) onData([]);
-          return;
+        if (isUnsubscribed || snapshot.empty) return;
+        if (!getSupabaseClient()) {
+          const movements: StockMovement[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              storeId,
+              produkId: data.produkId || '',
+              namaProduk: data.namaProduk || 'Produk Sembako',
+              kodeProduk: data.kodeProduk || '',
+              tipe: (data.tipe as MovementType) || 'masuk',
+              jumlah: Number(data.jumlah) || 0,
+              stokAwal: Number(data.stokAwal) || 0,
+              stokAkhir: Number(data.stokAkhir) || 0,
+              keterangan: data.keterangan || '',
+              supplier: data.supplier || '',
+              expiredDate: data.expiredDate || '',
+              batchNo: data.batchNo || '',
+              createdAt: data.createdAt || new Date().toISOString(),
+              operator: data.operator || 'Admin',
+            };
+          });
+          movements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          onData(movements);
         }
-        const movements: StockMovement[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            produkId: data.produkId || '',
-            namaProduk: data.namaProduk || 'Produk Sembako',
-            kodeProduk: data.kodeProduk || '',
-            tipe: (data.tipe as MovementType) || 'masuk',
-            jumlah: Number(data.jumlah) || 0,
-            stokAwal: Number(data.stokAwal) || 0,
-            stokAkhir: Number(data.stokAkhir) || 0,
-            keterangan: data.keterangan || '',
-            supplier: data.supplier || '',
-            expiredDate: data.expiredDate || '',
-            batchNo: data.batchNo || '',
-            createdAt: data.createdAt || new Date().toISOString(),
-            operator: data.operator || 'Admin',
-          };
-        });
-        movements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        onData(movements);
       },
-      (err) => {
-        console.warn('Firestore optional stock movements listener:', err);
-      }
+      () => {}
     );
   } catch (e) {}
 
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
-    try {
-      unsubscribeFirestore();
-    } catch (e) {}
+    try { unsubscribeRealtime(); } catch (_) {}
+    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
-// Record Stock Movement (Stok Masuk, Stok Keluar, Penyesuaian)
+/**
+ * Record Stock Movement (Stok Masuk, Stok Keluar, Penyesuaian) in Supabase + Firestore
+ */
 export async function recordStockMovement(params: {
   product: ProdukItem;
   tipe: MovementType;
-  jumlah: number; // For penyesuaian, this is the target total stock
+  jumlah: number;
   keterangan: string;
   supplier?: string;
   expiredDate?: string;
   batchNo?: string;
   operator?: string;
+  storeId?: string;
 }): Promise<string> {
   const { product, tipe, jumlah, keterangan, supplier, expiredDate, batchNo, operator } = params;
-  const path = COLLECTIONS.STOCK_MOVEMENTS;
+  const storeId = params.storeId || product.storeId || getCurrentStoreId();
 
   const stokAwal = product.stok;
   let stokAkhir = stokAwal;
@@ -240,9 +269,9 @@ export async function recordStockMovement(params: {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      // Insert stock movement
       await supabase.from('stock_movements').insert([{
         id,
+        store_id: storeId,
         produk_id: product.id,
         nama_produk: product.nama,
         kode_produk: product.kode,
@@ -258,7 +287,6 @@ export async function recordStockMovement(params: {
         created_at: now,
       }]);
 
-      // Update product stock in Supabase
       const prodUpdate: any = {
         stok: stokAkhir,
         updated_at: now,
@@ -266,8 +294,10 @@ export async function recordStockMovement(params: {
       if (expiredDate?.trim()) prodUpdate.expired_date = expiredDate.trim();
       if (batchNo?.trim()) prodUpdate.batch_no = batchNo.trim();
       await supabase.from('products').update(prodUpdate).eq('id', product.id);
+
+      logSupabase('sync', `Mutasi stok ${tipe} (${qtyDelta}) untuk "${product.nama}" tersimpan di Supabase`);
     } catch (sbErr) {
-      console.warn('[Supabase Record Stock Movement Error]:', sbErr);
+      logSupabase('error', 'Exception recordStockMovement Supabase:', sbErr);
     }
   }
 
@@ -277,6 +307,7 @@ export async function recordStockMovement(params: {
     const list = cached ? JSON.parse(cached) : [];
     list.unshift({
       id,
+      storeId,
       produkId: product.id,
       namaProduk: product.nama,
       kodeProduk: product.kode,
@@ -294,10 +325,11 @@ export async function recordStockMovement(params: {
     localStorage.setItem(CACHE_MOVEMENTS_KEY, JSON.stringify(list));
   } catch (e) {}
 
-  // 3. Firestore optional sync
+  // 3. Firestore sync
   try {
     const movementsRef = collection(db, COLLECTIONS.STOCK_MOVEMENTS);
     await addDoc(movementsRef, {
+      storeId,
       produkId: product.id,
       namaProduk: product.nama,
       kodeProduk: product.kode,
@@ -314,204 +346,134 @@ export async function recordStockMovement(params: {
     });
 
     const productRef = doc(db, COLLECTIONS.PRODUCTS, product.id);
-    const updatePayload: Record<string, any> = {
+    await setDoc(productRef, {
       stok: stokAkhir,
       updatedAt: now,
-    };
-    if (expiredDate?.trim()) updatePayload.expiredDate = expiredDate.trim();
-    if (batchNo?.trim()) updatePayload.batchNo = batchNo.trim();
-    await setDoc(productRef, updatePayload, { merge: true });
-  } catch (error) {
-    console.warn('Firestore optional stock update skipped:', error);
-  }
+      ...(expiredDate?.trim() ? { expiredDate: expiredDate.trim() } : {}),
+      ...(batchNo?.trim() ? { batchNo: batchNo.trim() } : {}),
+    }, { merge: true });
+  } catch (err) {}
 
   return id;
 }
 
-// Subscribe to Realtime Stock Opnames with instant Supabase loading
+/**
+ * Subscribe to Stock Opnames list with Supabase Realtime support
+ */
 export function subscribeStockOpnames(
   onData: (opnames: StockOpname[]) => void,
   onError?: (error: Error) => void
-) {
+): () => void {
   let isUnsubscribed = false;
-  let hasEmitted = false;
+  const storeId = getCurrentStoreId();
 
-  // 1. Instant cache
   try {
     const cached = localStorage.getItem(CACHE_OPNAMES_KEY);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) {
-        hasEmitted = true;
-        onData(parsed);
-      }
+      if (Array.isArray(parsed)) onData(parsed);
     }
   } catch (e) {}
 
-  // 2. Fast Supabase fetch (<100ms)
-  fetchStockOpnamesDirect().then((items) => {
-    if (!isUnsubscribed) {
-      hasEmitted = true;
-      onData(items);
-    }
-  }).catch(() => {
-    if (!isUnsubscribed && !hasEmitted) onData([]);
+  fetchStockOpnamesDirect(storeId).then((items) => {
+    if (!isUnsubscribed) onData(items);
   });
 
-  // 3. 3s Polling against Supabase
+  const unsubscribeRealtime = subscribeRealtimeTable('stock_opnames', storeId, async () => {
+    if (isUnsubscribed) return;
+    const refreshed = await fetchStockOpnamesDirect(storeId);
+    if (!isUnsubscribed) onData(refreshed);
+  });
+
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     try {
-      const items = await fetchStockOpnamesDirect();
-      if (!isUnsubscribed) {
-        onData(items);
-      }
+      const items = await fetchStockOpnamesDirect(storeId);
+      if (!isUnsubscribed) onData(items);
     } catch (e) {}
-  }, 3000);
-
-  // 4. Background Firestore listener (non-blocking)
-  let unsubscribeFirestore = () => {};
-  try {
-    const opnamesRef = collection(db, COLLECTIONS.STOCK_OPNAMES);
-    const q = query(opnamesRef);
-    unsubscribeFirestore = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isUnsubscribed) return;
-        if (snapshot.empty) {
-          if (!hasEmitted) onData([]);
-          return;
-        }
-        const opnames: StockOpname[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            tanggal: data.tanggal || new Date().toISOString().split('T')[0],
-            produkId: data.produkId || '',
-            namaProduk: data.namaProduk || '',
-            kodeProduk: data.kodeProduk || '',
-            stokSistem: Number(data.stokSistem) || 0,
-            stokFisik: Number(data.stokFisik) || 0,
-            selisih: Number(data.selisih) || 0,
-            alasan: data.alasan || '',
-            status: data.status || 'selesai',
-            createdAt: data.createdAt || new Date().toISOString(),
-            operator: data.operator || 'Admin',
-          };
-        });
-        opnames.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        onData(opnames);
-      },
-      (err) => {
-        console.warn('Firestore optional stock opnames listener:', err);
-      }
-    );
-  } catch (e) {}
+  }, 4000);
 
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
-    try {
-      unsubscribeFirestore();
-    } catch (e) {}
+    try { unsubscribeRealtime(); } catch (_) {}
   };
 }
 
-// Record Stock Opname Audit
-export async function recordStockOpname(params: {
-  product: ProdukItem;
+/**
+ * Alias for saveStockOpname
+ */
+export const recordStockOpname = saveStockOpname;
+
+export async function adjustStockDirect(
+  product: ProdukItem,
+  newStok: number,
+  alasan: string = 'Penyesuaian stok langsung',
+  operator: string = 'Admin Toko'
+): Promise<void> {
+  await recordStockMovement({
+    product,
+    tipe: 'penyesuaian',
+    jumlah: newStok,
+    keterangan: alasan,
+    operator,
+  });
+}
+
+/**
+ * Save Stock Opname result
+ */
+export async function saveStockOpname(params: {
+  produk?: ProdukItem;
+  product?: ProdukItem;
   stokFisik: number;
   alasan: string;
   operator?: string;
+  storeId?: string;
 }): Promise<string> {
-  const { product, stokFisik, alasan, operator } = params;
-  const stokSistem = product.stok;
+  const targetProduct = (params.produk || params.product)!;
+  const { stokFisik, alasan, operator } = params;
+  const storeId = params.storeId || targetProduct.storeId || getCurrentStoreId();
+  const stokSistem = targetProduct.stok;
   const selisih = stokFisik - stokSistem;
   const now = new Date().toISOString();
-  const todayStr = now.split('T')[0];
   const id = `so-${Date.now()}`;
 
-  // 1. Supabase insert
+  // 1. Supabase save
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
       await supabase.from('stock_opnames').insert([{
         id,
-        tanggal: todayStr,
-        produk_id: product.id,
-        nama_produk: product.nama,
-        kode_produk: product.kode,
+        store_id: storeId,
+        tanggal: now.split('T')[0],
+        produk_id: targetProduct.id,
+        nama_produk: targetProduct.nama,
+        kode_produk: targetProduct.kode,
         stok_sistem: stokSistem,
         stok_fisik: stokFisik,
         selisih,
-        alasan: alasan.trim() || 'Stock Opname Fisik Toko',
+        alasan,
         status: 'selesai',
         operator: operator || 'Admin Toko',
         created_at: now,
       }]);
 
-      await supabase.from('stock_movements').insert([{
-        id: `sm-so-${Date.now()}`,
-        produk_id: product.id,
-        nama_produk: product.nama,
-        kode_produk: product.kode,
-        tipe: 'opname',
-        jumlah: Math.abs(selisih),
-        stok_awal: stokSistem,
-        stok_akhir: stokFisik,
-        keterangan: `Stock Opname Audit: ${alasan} (Selisih: ${selisih > 0 ? '+' : ''}${selisih})`,
-        operator: operator || 'Admin Toko',
-        created_at: now,
-      }]);
-
-      await supabase.from('products').update({
-        stok: stokFisik,
-        updated_at: now,
-      }).eq('id', product.id);
-    } catch (sbErr) {
-      console.warn('[Supabase Record Stock Opname Error]:', sbErr);
+      logSupabase('sync', `Stock Opname untuk "${targetProduct.nama}" tersimpan di Supabase`);
+    } catch (e) {
+      logSupabase('error', 'Exception saveStockOpname Supabase:', e);
     }
   }
 
-  // 2. Firestore optional
-  try {
-    const opnamesRef = collection(db, COLLECTIONS.STOCK_OPNAMES);
-    await addDoc(opnamesRef, {
-      tanggal: todayStr,
-      produkId: product.id,
-      namaProduk: product.nama,
-      kodeProduk: product.kode,
-      stokSistem,
-      stokFisik,
-      selisih,
-      alasan: alasan.trim() || 'Stock Opname Fisik Toko',
-      status: 'selesai',
-      createdAt: now,
-      operator: operator || 'Admin Toko',
-    });
-
-    const movementsRef = collection(db, COLLECTIONS.STOCK_MOVEMENTS);
-    await addDoc(movementsRef, {
-      produkId: product.id,
-      namaProduk: product.nama,
-      kodeProduk: product.kode,
-      tipe: 'opname',
-      jumlah: Math.abs(selisih),
-      stokAwal: stokSistem,
-      stokAkhir: stokFisik,
-      keterangan: `Stock Opname Audit: ${alasan} (Selisih: ${selisih > 0 ? '+' : ''}${selisih})`,
-      createdAt: now,
-      operator: operator || 'Admin Toko',
-    });
-
-    const productRef = doc(db, COLLECTIONS.PRODUCTS, product.id);
-    await setDoc(productRef, {
-      stok: stokFisik,
-      updatedAt: now,
-    }, { merge: true });
-  } catch (error) {
-    console.warn('Firestore optional stock opname skipped:', error);
-  }
+  // 2. Adjust current stock to physical count
+  await recordStockMovement({
+    product: targetProduct,
+    tipe: 'penyesuaian',
+    jumlah: stokFisik,
+    keterangan: `Stock Opname: ${alasan} (Selisih: ${selisih > 0 ? '+' : ''}${selisih})`,
+    operator: operator || 'Admin Toko',
+    storeId,
+  });
 
   return id;
 }

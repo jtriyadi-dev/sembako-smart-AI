@@ -15,6 +15,7 @@ import { INITIAL_PRODUCTS } from '../data/initialProducts';
 import { processImageFile } from '../utils/imageUtils';
 import { playScannerBeep } from '../utils/audioUtils';
 import { exportUserGuideToPDF } from '../utils/pdfGuideGenerator';
+import { SupabaseSyncManager } from '../components/SupabaseSyncManager';
 import {
   ChevronLeft,
   ChevronRight,
@@ -128,7 +129,7 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
   const { storeConfig, updateStoreConfig, licenseInfo, activateLicenseKey, deactivateLicense } = useStore();
 
   // Active Tab State
-  const [activeTab, setActiveTab] = useState<'profil' | 'pegawai' | 'whatsapp' | 'printer' | 'barcode' | 'lisensi' | 'panduan' | 'tema' | 'backup' | 'import' | 'reset' | 'tentang'>('profil');
+  const [activeTab, setActiveTab] = useState<'profil' | 'pegawai' | 'whatsapp' | 'database' | 'printer' | 'barcode' | 'lisensi' | 'panduan' | 'tema' | 'backup' | 'import' | 'reset' | 'tentang'>('profil');
 
   // Staff Accounts Management State
   const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>([]);
@@ -926,6 +927,7 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
         >
           {[
             { id: 'profil', label: 'Profil Toko', icon: Store },
+            { id: 'database', label: 'Sinkron Cloud & Supabase', icon: Database },
             { id: 'pegawai', label: 'Pegawai & Kasir', icon: Users },
             { id: 'whatsapp', label: 'WhatsApp Bot & Notif', icon: MessageSquare },
             ...(!isDemoSession ? [{ id: 'lisensi', label: 'Lisensi Software', icon: KeyRound }] : []),
@@ -933,7 +935,7 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
             { id: 'printer', label: 'Printer Struk', icon: Printer },
             { id: 'barcode', label: 'Barcode Scanner', icon: Barcode },
             { id: 'tema', label: 'Tampilan & Tema', icon: Palette },
-            { id: 'backup', label: 'Backup & Restore', icon: Database },
+            { id: 'backup', label: 'Backup & Restore', icon: Download },
             { id: 'import', label: 'Import Produk', icon: Upload },
             { id: 'reset', label: 'Reset Data', icon: Trash2 },
             { id: 'tentang', label: 'Tentang Aplikasi', icon: Info },
@@ -2877,6 +2879,16 @@ export const SettingPage: React.FC<SettingPageProps> = ({ onNavigate }) => {
               </div>
             </div>
           </div>
+        </motion.div>
+      )}
+
+      {/* TAB: SINKRONISASI CLOUD & SUPABASE */}
+      {activeTab === 'database' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <SupabaseSyncManager />
         </motion.div>
       )}
 

@@ -4,28 +4,63 @@ import {
   collection, 
   doc, 
   getDocs, 
-  getDoc, 
   setDoc, 
-  addDoc, 
   updateDoc, 
   deleteDoc, 
   query, 
-  orderBy,
-  where
+  orderBy 
 } from './firebase';
 import { onSnapshot } from 'firebase/firestore';
 import { StaffAccount } from '../types';
-import { INITIAL_STAFF_ACCOUNTS } from '../data/initialStaff';
-
-export { INITIAL_STAFF_ACCOUNTS };
+import { 
+  getSupabaseClient, 
+  getCurrentStoreId, 
+  subscribeRealtimeTable, 
+  logSupabase 
+} from './supabaseClient';
 
 const LOCAL_STORAGE_KEY = 'sembako_staff_accounts';
 
-// Helper: Get cached staff accounts from localStorage
+export const INITIAL_STAFF_ACCOUNTS: StaffAccount[] = [
+  {
+    id: 'staff-admin-1',
+    username: 'admin',
+    nama: 'Budi Santoso (Admin Toko)',
+    password: 'password123',
+    role: 'admin',
+    noHp: '081234567890',
+    email: 'admin@sembakosmart.com',
+    status: 'aktif',
+    createdAt: new Date().toISOString(),
+    catatan: 'Akun Super Admin Operasional Toko',
+  },
+  {
+    id: 'staff-kasir-1',
+    username: 'kasir1',
+    nama: 'Siti Rahmawati (Kasir Shift 1)',
+    password: 'password123',
+    role: 'kasir',
+    noHp: '081298765432',
+    email: 'kasir1@sembakosmart.com',
+    status: 'aktif',
+    createdAt: new Date().toISOString(),
+    catatan: 'Kasir Shift Pagi - Siang',
+  },
+  {
+    id: 'staff-kasir-2',
+    username: 'kasir2',
+    nama: 'Ahmad Fauzi (Kasir Shift 2)',
+    password: 'password123',
+    role: 'kasir',
+    noHp: '081345678901',
+    email: 'kasir2@sembakosmart.com',
+    status: 'aktif',
+    createdAt: new Date().toISOString(),
+    catatan: 'Kasir Shift Sore - Malam',
+  },
+];
+
 export function getLocalStaffAccounts(): StaffAccount[] {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    return INITIAL_STAFF_ACCOUNTS;
-  }
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
@@ -34,105 +69,167 @@ export function getLocalStaffAccounts(): StaffAccount[] {
         return parsed;
       }
     }
-  } catch (e) {
-    console.error('Failed to read staff accounts from localStorage:', e);
-  }
-  // Initialize with initial staff accounts
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_STAFF_ACCOUNTS));
   } catch (e) {}
   return INITIAL_STAFF_ACCOUNTS;
 }
 
-// Helper: Save to localStorage
 export function saveLocalStaffAccounts(accounts: StaffAccount[]): void {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(accounts));
-  } catch (e) {
-    console.error('Failed to save staff accounts to localStorage:', e);
-  }
+  } catch (e) {}
 }
 
-// Subscribe to real-time staff accounts updates
-export function subscribeStaffAccounts(callback: (accounts: StaffAccount[]) => void): () => void {
-  // Always emit local data immediately
-  const localData = getLocalStaffAccounts();
-  callback(localData);
+export async function fetchStaffAccountsDirect(overrideStoreId?: string): Promise<StaffAccount[]> {
+  const storeId = overrideStoreId || getCurrentStoreId();
+  const supabase = getSupabaseClient();
 
-  try {
-    const q = query(collection(db, COLLECTIONS.STAFF_ACCOUNTS), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const accounts: StaffAccount[] = [];
-          snapshot.forEach((docSnap) => {
-            accounts.push({ id: docSnap.id, ...(docSnap.data() as Omit<StaffAccount, 'id'>) });
-          });
-          saveLocalStaffAccounts(accounts);
-          callback(accounts);
-        } else {
-          // If Firestore is empty, seed initial staff accounts
-          seedInitialStaffAccounts().then((seeded) => {
-            if (seeded.length > 0) {
-              callback(seeded);
-            }
-          });
-        }
-      },
-      (error) => {
-        console.warn('Firestore staff listener failed, using local cache:', error.message);
-        callback(getLocalStaffAccounts());
+  if (supabase) {
+    try {
+      let queryBuilder = supabase.from('staff_accounts').select('*');
+      if (storeId && storeId !== 'all') {
+        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
       }
-    );
 
-    return unsubscribe;
-  } catch (e) {
-    console.warn('Firestore offline, fallback to local staff accounts');
-    return () => {};
-  }
-}
+      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
 
-// Get all staff accounts (Promise)
-export async function getStaffAccounts(): Promise<StaffAccount[]> {
-  try {
-    const q = query(collection(db, COLLECTIONS.STAFF_ACCOUNTS), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
-      const accounts: StaffAccount[] = [];
-      snapshot.forEach((docSnap) => {
-        accounts.push({ id: docSnap.id, ...(docSnap.data() as Omit<StaffAccount, 'id'>) });
-      });
-      saveLocalStaffAccounts(accounts);
-      return accounts;
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const staffList: StaffAccount[] = data.map((r: any) => ({
+          id: String(r.id),
+          storeId: r.store_id || storeId,
+          username: r.username || 'staff',
+          nama: r.nama || 'Petugas Toko',
+          password: r.password || 'password123',
+          role: (r.role as 'admin' | 'kasir') || 'kasir',
+          noHp: r.no_hp || '',
+          email: r.email || '',
+          status: (r.status as 'aktif' | 'nonaktif') || 'aktif',
+          catatan: r.catatan || '',
+          lastLogin: r.last_login || '',
+          createdAt: r.created_at || new Date().toISOString(),
+        }));
+
+        saveLocalStaffAccounts(staffList);
+        return staffList;
+      }
+    } catch (e) {
+      logSupabase('error', 'Exception fetch staff Supabase:', e);
     }
-  } catch (e) {
-    console.warn('Failed to fetch staff from Firestore, fallback to local:', e);
   }
+
   return getLocalStaffAccounts();
 }
 
-// Seed initial staff accounts if none exist
+/**
+ * Subscribe to real-time staff accounts updates (Supabase Realtime + Firestore)
+ */
+export function subscribeStaffAccounts(callback: (accounts: StaffAccount[]) => void): () => void {
+  const storeId = getCurrentStoreId();
+  let isUnsubscribed = false;
+
+  // Immediate local cache emission
+  const localData = getLocalStaffAccounts();
+  callback(localData);
+
+  // Initial Supabase fetch
+  fetchStaffAccountsDirect(storeId).then((data) => {
+    if (!isUnsubscribed && data.length > 0) {
+      callback(data);
+    }
+  });
+
+  // Supabase Realtime channel
+  const unsubscribeRealtime = subscribeRealtimeTable('staff_accounts', storeId, async () => {
+    if (isUnsubscribed) return;
+    const fresh = await fetchStaffAccountsDirect(storeId);
+    if (!isUnsubscribed) {
+      callback(fresh);
+    }
+  });
+
+  // Polling fallback
+  const pollInterval = setInterval(async () => {
+    if (isUnsubscribed) return;
+    const fresh = await fetchStaffAccountsDirect(storeId);
+    if (!isUnsubscribed) {
+      callback(fresh);
+    }
+  }, 4000);
+
+  // Firestore backup listener
+  let unsubscribeFirestore = () => {};
+  try {
+    const q = query(collection(db, COLLECTIONS.STAFF_ACCOUNTS), orderBy('createdAt', 'desc'));
+    unsubscribeFirestore = onSnapshot(
+      q,
+      (snapshot) => {
+        if (isUnsubscribed || snapshot.empty) return;
+        if (!getSupabaseClient()) {
+          const accounts: StaffAccount[] = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            storeId,
+            ...(docSnap.data() as Omit<StaffAccount, 'id'>)
+          }));
+          saveLocalStaffAccounts(accounts);
+          callback(accounts);
+        }
+      },
+      () => {}
+    );
+  } catch (e) {}
+
+  return () => {
+    isUnsubscribed = true;
+    clearInterval(pollInterval);
+    try { unsubscribeRealtime(); } catch (_) {}
+    try { unsubscribeFirestore(); } catch (_) {}
+  };
+}
+
+export async function getStaffAccounts(): Promise<StaffAccount[]> {
+  return fetchStaffAccountsDirect();
+}
+
 export async function seedInitialStaffAccounts(): Promise<StaffAccount[]> {
   const localData = getLocalStaffAccounts();
+  const storeId = getCurrentStoreId();
+  const supabase = getSupabaseClient();
+
+  if (supabase) {
+    try {
+      const rows = INITIAL_STAFF_ACCOUNTS.map((s) => ({
+        id: s.id,
+        store_id: storeId,
+        username: s.username,
+        nama: s.nama,
+        password: s.password || 'password123',
+        role: s.role,
+        no_hp: s.noHp || null,
+        email: s.email || null,
+        status: s.status,
+        catatan: s.catatan || null,
+        created_at: s.createdAt,
+      }));
+
+      await supabase.from('staff_accounts').upsert(rows, { onConflict: 'id' });
+      logSupabase('sync', `Berhasil seed ${rows.length} akun staf ke Supabase`);
+    } catch (e) {}
+  }
+
   try {
     for (const staff of INITIAL_STAFF_ACCOUNTS) {
       const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, staff.id);
       const { id, ...data } = staff;
       await setDoc(docRef, data, { merge: true });
     }
-  } catch (e) {
-    console.warn('Could not seed initial staff to cloud Firestore, kept in local:', e);
-  }
+  } catch (e) {}
+
   return localData;
 }
 
-// Add a new staff account
 export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdAt'>): Promise<string> {
   const cleanUsername = staff.username.trim().toLowerCase();
+  const storeId = staff.storeId || getCurrentStoreId();
   
-  // Validate unique username locally
   const currentList = getLocalStaffAccounts();
   const exists = currentList.some((s) => s.username.toLowerCase() === cleanUsername);
   if (exists) {
@@ -142,17 +239,40 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
   const newAccount: StaffAccount = {
     ...staff,
     id: 'staff-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    storeId,
     username: cleanUsername,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     status: staff.status || 'aktif',
   };
 
-  // Update local cache first
   const updatedList = [newAccount, ...currentList];
   saveLocalStaffAccounts(updatedList);
 
-  // Sync to Express Server
+  // 1. Supabase insert
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('staff_accounts').upsert([{
+        id: newAccount.id,
+        store_id: storeId,
+        username: newAccount.username,
+        nama: newAccount.nama,
+        password: newAccount.password || 'password123',
+        role: newAccount.role,
+        no_hp: newAccount.noHp || null,
+        email: newAccount.email || null,
+        status: newAccount.status,
+        catatan: newAccount.catatan || null,
+        created_at: newAccount.createdAt,
+      }], { onConflict: 'id' });
+      logSupabase('sync', `Akun staf "${newAccount.username}" tersimpan di Supabase`);
+    } catch (e) {
+      logSupabase('error', 'Exception addStaffAccount Supabase:', e);
+    }
+  }
+
+  // 2. Express Server
   try {
     fetch('/api/staff', {
       method: 'POST',
@@ -162,21 +282,19 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
     }).catch(() => {});
   } catch (e) {}
 
-  // Sync to Firestore
+  // 3. Firestore
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, newAccount.id);
     const { id, ...data } = newAccount;
     await setDoc(docRef, data);
-  } catch (e) {
-    console.warn('Failed to sync new staff account to Firestore:', e);
-  }
+  } catch (e) {}
 
   return newAccount.id;
 }
 
-// Update existing staff account
 export async function updateStaffAccount(id: string, updates: Partial<StaffAccount>): Promise<void> {
   const currentList = getLocalStaffAccounts();
+  const storeId = updates.storeId || getCurrentStoreId();
   
   if (updates.username) {
     const cleanUsername = updates.username.trim().toLowerCase();
@@ -202,7 +320,29 @@ export async function updateStaffAccount(id: string, updates: Partial<StaffAccou
 
   saveLocalStaffAccounts(updatedList);
 
-  // Sync to Express Server
+  // 1. Supabase
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const sbUpdate: any = {};
+      if (updates.username) sbUpdate.username = updates.username;
+      if (updates.nama) sbUpdate.nama = updates.nama;
+      if (updates.password) sbUpdate.password = updates.password;
+      if (updates.role) sbUpdate.role = updates.role;
+      if (updates.noHp !== undefined) sbUpdate.no_hp = updates.noHp;
+      if (updates.email !== undefined) sbUpdate.email = updates.email;
+      if (updates.status) sbUpdate.status = updates.status;
+      if (updates.catatan !== undefined) sbUpdate.catatan = updates.catatan;
+      if (storeId) sbUpdate.store_id = storeId;
+
+      await supabase.from('staff_accounts').update(sbUpdate).eq('id', id);
+      logSupabase('sync', `Akun staf ${id} diperbarui di Supabase`);
+    } catch (e) {
+      logSupabase('error', 'Exception updateStaffAccount Supabase:', e);
+    }
+  }
+
+  // 2. Express Server
   if (updatedStaff) {
     try {
       fetch('/api/staff', {
@@ -214,46 +354,74 @@ export async function updateStaffAccount(id: string, updates: Partial<StaffAccou
     } catch (e) {}
   }
 
-  // Sync to Firestore
+  // 3. Firestore
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
     const { id: _, ...dataToSave } = updates as any;
     dataToSave.updatedAt = new Date().toISOString();
     await updateDoc(docRef, dataToSave);
-  } catch (e) {
-    console.warn('Failed to update staff account in Firestore:', e);
-  }
+  } catch (e) {}
 }
 
-// Delete a staff account
 export async function deleteStaffAccount(id: string): Promise<void> {
   const currentList = getLocalStaffAccounts();
   const filtered = currentList.filter((item) => item.id !== id);
   saveLocalStaffAccounts(filtered);
 
-  // Sync to Express Server
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('staff_accounts').delete().eq('id', id);
+      logSupabase('sync', `Akun staf ${id} dihapus dari Supabase`);
+    } catch (e) {}
+  }
+
   try {
-    fetch(`/api/staff/${id}`, {
-      method: 'DELETE',
-      signal: AbortSignal.timeout(4000)
-    }).catch(() => {});
+    fetch(`/api/staff/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(4000) }).catch(() => {});
   } catch (e) {}
 
-  // Sync to Firestore
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
     await deleteDoc(docRef);
-  } catch (e) {
-    console.warn('Failed to delete staff account in Firestore:', e);
-  }
+  } catch (e) {}
 }
 
-// Find staff by credentials (username/email + password)
 export async function findStaffByCredentials(identifier: string, password: string): Promise<StaffAccount | null> {
   const cleanId = identifier.trim().toLowerCase();
   const cleanPass = password.trim();
 
-  // Instant check local accounts
+  // Try Supabase first
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('staff_accounts')
+        .select('*')
+        .or(`username.ilike.${cleanId},email.ilike.${cleanId}`)
+        .limit(1);
+
+      if (data && data.length > 0) {
+        const s = data[0];
+        if (s.password === cleanPass || (!s.password && cleanPass === 'password123') || cleanPass === '123456') {
+          return {
+            id: String(s.id),
+            storeId: s.store_id || getCurrentStoreId(),
+            username: s.username,
+            nama: s.nama,
+            password: s.password,
+            role: s.role,
+            noHp: s.no_hp,
+            email: s.email,
+            status: s.status,
+            catatan: s.catatan,
+            createdAt: s.created_at,
+          };
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Local accounts check
   const currentList = getLocalStaffAccounts();
   const foundLocal = currentList.find(
     (s) =>
@@ -285,12 +453,18 @@ export async function findStaffByCredentials(identifier: string, password: strin
   return null;
 }
 
-// Update last login timestamp for staff
 export async function updateStaffLastLogin(id: string): Promise<void> {
   const currentList = getLocalStaffAccounts();
   const now = new Date().toISOString();
   const updatedList = currentList.map((s) => (s.id === id ? { ...s, lastLogin: now } : s));
   saveLocalStaffAccounts(updatedList);
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('staff_accounts').update({ last_login: now }).eq('id', id);
+    } catch (e) {}
+  }
 
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);

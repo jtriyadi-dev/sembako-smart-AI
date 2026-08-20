@@ -4,11 +4,89 @@ import { ProdukItem, TransaksiItem, CrmUser } from '../types';
 let cachedClient: SupabaseClient | null = null;
 let currentConfigKey = '';
 
+// Active Realtime Channel Registry
+const activeChannels = new Map<string, any>();
+
+/**
+ * STORE ID / TENANT ID MANAGEMENT
+ * Ensures deterministic, persistent store identification for multi-device sync
+ */
+const DEFAULT_STORE_ID = 'default_store';
+const STORAGE_STORE_ID_KEY = 'sembako_current_store_id';
+
+export function getCurrentStoreId(): string {
+  if (typeof window === 'undefined') return DEFAULT_STORE_ID;
+  try {
+    const saved = localStorage.getItem(STORAGE_STORE_ID_KEY);
+    if (saved && saved.trim()) return saved.trim();
+
+    // Fallback: derive from license key or active store user
+    const licKey = localStorage.getItem('sembako_license_key');
+    if (licKey && licKey.trim()) {
+      const cleanLic = licKey.trim().toUpperCase();
+      const derived = `store_${cleanLic.replace(/[^A-Z0-9]/g, '_').toLowerCase()}`;
+      localStorage.setItem(STORAGE_STORE_ID_KEY, derived);
+      return derived;
+    }
+
+    const savedStore = localStorage.getItem('sembako_license_store');
+    if (savedStore && savedStore.trim()) {
+      const derived = `store_${savedStore.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
+      localStorage.setItem(STORAGE_STORE_ID_KEY, derived);
+      return derived;
+    }
+  } catch (_) {}
+  return DEFAULT_STORE_ID;
+}
+
+export function setCurrentStoreId(storeId: string): void {
+  if (!storeId || typeof window === 'undefined') return;
+  const cleanId = storeId.trim();
+  try {
+    localStorage.setItem(STORAGE_STORE_ID_KEY, cleanId);
+    console.log(`[Supabase Store Tenant] Active Store ID set to: "${cleanId}"`);
+  } catch (_) {}
+}
+
+export function getEffectiveStoreId(userOrProfile?: any): string {
+  if (userOrProfile) {
+    if (userOrProfile.storeId && userOrProfile.storeId.trim()) {
+      return userOrProfile.storeId.trim();
+    }
+    if (userOrProfile.licenseKey && userOrProfile.licenseKey.trim()) {
+      return `store_${userOrProfile.licenseKey.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_').toLowerCase()}`;
+    }
+    if (userOrProfile.namaToko && userOrProfile.namaToko.trim()) {
+      return `store_${userOrProfile.namaToko.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
+    }
+    if (userOrProfile.id && String(userOrProfile.id).startsWith('user-')) {
+      return `store_${String(userOrProfile.id).replace('user-', '')}`;
+    }
+  }
+  return getCurrentStoreId();
+}
+
+/**
+ * Structured Supabase Logging
+ */
+export function logSupabase(type: 'connected' | 'query' | 'error' | 'realtime' | 'sync', message: string, extra?: any): void {
+  const prefix = `[Supabase ${type.toUpperCase()}]`;
+  if (type === 'error') {
+    console.error(`${prefix} ❌ ${message}`, extra !== undefined ? extra : '');
+  } else if (type === 'realtime') {
+    console.log(`%c${prefix} ⚡ ${message}`, 'color: #06b6d4; font-weight: bold;', extra !== undefined ? extra : '');
+  } else if (type === 'connected') {
+    console.log(`%c${prefix} 🟢 ${message}`, 'color: #10b981; font-weight: bold;', extra !== undefined ? extra : '');
+  } else {
+    console.log(`${prefix} ℹ️ ${message}`, extra !== undefined ? extra : '');
+  }
+}
+
 /**
  * Get active Supabase client with fallback hierarchy:
  * 1. Explicit arguments
  * 2. LocalStorage / Control Panel API keys (sembako_developer_api_keys, sem_api_keys, etc.)
- * 3. Vite environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_SUPABASE_SERVICE_ROLE_KEY)
+ * 3. Vite environment variables (VITE_SUPABASE_URL, SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_PUBLISHABLE_KEY)
  */
 export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): SupabaseClient | null {
   const env = (import.meta as any).env || {};
@@ -34,13 +112,21 @@ export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): S
     }
   } catch (_) {}
 
-  let url = (overrideUrl || localKeys.supabaseUrl || env.VITE_SUPABASE_URL || '').trim();
+  let url = (
+    overrideUrl ||
+    localKeys.supabaseUrl ||
+    env.VITE_SUPABASE_URL ||
+    env.SUPABASE_URL ||
+    ''
+  ).trim();
+
   let key = (
     overrideKey ||
     localKeys.supabaseServiceRoleKey ||
     localKeys.supabaseAnonKey ||
     env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
     env.VITE_SUPABASE_ANON_KEY ||
+    env.SUPABASE_PUBLISHABLE_KEY ||
     ''
   ).trim();
 
@@ -62,12 +148,83 @@ export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): S
         persistSession: true,
         autoRefreshToken: true,
       },
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
     });
     currentConfigKey = configSignature;
+    logSupabase('connected', `Koneksi Supabase aktif (${url})`);
     return cachedClient;
   } catch (err) {
-    console.warn('[Supabase Client Init Error]:', err);
+    logSupabase('error', 'Inisialisasi klien Supabase gagal', err);
     return null;
+  }
+}
+
+/**
+ * Realtime Multi-Device Table Subscription
+ * Listens for postgres_changes on specific table with automatic reconnect & filter
+ */
+export function subscribeRealtimeTable(
+  tableName: string,
+  storeId: string,
+  onChange: (payload: any) => void
+): () => void {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return () => {};
+  }
+
+  const channelKey = `${tableName}_${storeId || 'all'}`;
+  
+  // Clean up any existing channel with same key
+  if (activeChannels.has(channelKey)) {
+    try {
+      supabase.removeChannel(activeChannels.get(channelKey));
+    } catch (_) {}
+  }
+
+  try {
+    const channel = supabase.channel(`realtime_${channelKey}`);
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: tableName,
+        },
+        (payload) => {
+          logSupabase('realtime', `Perubahan diterima pada tabel "${tableName}" (event: ${payload.eventType})`, payload);
+          // Check if payload row matches store_id or is general
+          const row = (payload.new as any) || (payload.old as any);
+          if (!row || !row.store_id || row.store_id === storeId || row.store_id === DEFAULT_STORE_ID || !storeId) {
+            onChange(payload);
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          logSupabase('realtime', `Tersambung Realtime ke tabel "${tableName}" (Store ID: ${storeId || 'all'})`);
+        } else if (err || status === 'CHANNEL_ERROR') {
+          logSupabase('error', `Realtime Channel error pada tabel "${tableName}": ${status}`, err);
+        }
+      });
+
+    activeChannels.set(channelKey, channel);
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+        activeChannels.delete(channelKey);
+      } catch (_) {}
+    };
+  } catch (err) {
+    logSupabase('error', `Gagal subscribe realtime ke tabel ${tableName}:`, err);
+    return () => {};
   }
 }
 
@@ -83,10 +240,13 @@ export async function syncUserToSupabaseDirect(user: CrmUser): Promise<{ success
     };
   }
 
+  const storeId = user.storeId || getEffectiveStoreId(user);
+
   try {
     // 1. Try full schema record
     const fullRecord: Record<string, any> = {
       id: user.id || `user-crm-${Date.now()}`,
+      store_id: storeId,
       nama_pemilik: user.namaPemilik || 'Pelanggan Toko',
       nama_toko: user.namaToko || 'Toko Sembako',
       email: user.email || '',
@@ -108,15 +268,16 @@ export async function syncUserToSupabaseDirect(user: CrmUser): Promise<{ success
     const { error: fullErr } = await sbClient.from('crm_users').upsert(fullRecord, { onConflict: 'id' });
 
     if (!fullErr) {
+      logSupabase('sync', `Akun CRM "${user.namaPemilik}" tersimpan di crm_users (Store: ${storeId})`);
       return {
         success: true,
         message: `✅ Akun "${user.namaPemilik}" berhasil disinkronkan ke tabel crm_users Supabase!`,
       };
     }
 
-    console.warn('[Supabase Full Upsert Failed, trying basic fields]:', fullErr.message);
+    logSupabase('error', 'Upsert crm_users schema lengkap gagal, mencoba kolom standar', fullErr.message);
 
-    // 2. Fallback to basic columns (if custom table was created with only standard columns)
+    // 2. Fallback to basic columns
     const basicRecord: Record<string, any> = {
       id: user.id || `user-crm-${Date.now()}`,
       nama_pemilik: user.namaPemilik || 'Pelanggan Toko',
@@ -134,18 +295,9 @@ export async function syncUserToSupabaseDirect(user: CrmUser): Promise<{ success
       };
     }
 
-    // 3. Fallback: try inserting without upsert
-    const { error: insertErr } = await sbClient.from('crm_users').insert([basicRecord]);
-    if (!insertErr) {
-      return {
-        success: true,
-        message: `✅ Akun "${user.namaPemilik}" berhasil di-insert ke Supabase!`,
-      };
-    }
-
     return {
       success: false,
-      message: `Gagal simpan ke Supabase: ${insertErr.message || basicErr.message || fullErr.message}`,
+      message: `Gagal simpan ke Supabase: ${basicErr.message || fullErr.message}`,
     };
   } catch (err: any) {
     return {
@@ -222,9 +374,7 @@ export async function testSupabaseConnection(
         const errJson = await authSettingsRes.json().catch(() => ({}));
         authErrorDetail = errJson.message || errJson.msg || 'Invalid API Key';
       }
-    } catch (_) {
-      // If network error on auth endpoint, proceed to client check
-    }
+    } catch (_) {}
 
     // 2. Test PostgREST table query with Supabase JS Client
     const tempClient = createClient(cleanUrl, cleanKey, {
@@ -277,19 +427,61 @@ export async function testSupabaseConnection(
 
 /**
  * SQL Schema script to run in Supabase SQL Editor
+ * Complete Multi-Device Multi-Tenant Schema with store_id, profiles, store_members, RLS, and Realtime Publications
  */
 export const SUPABASE_SCHEMA_SQL = `-- =========================================================================
--- SEMBAKO SMART AI POS - SUPABASE POSTGRESQL SCHEMA MIGRATION
+-- SEMBAKO SMART AI POS - MULTI-DEVICE SUPABASE SCHEMA MIGRATION
 -- Jalankan skrip ini di SQL Editor dashboard Supabase Anda
 -- =========================================================================
 
 -- 1. Enable UUID Extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. TABLE: PRODUCTS (Data Produk Sembako, Kategori, Stok & Barcode)
+-- 2. TABLE: STORES (Data Toko & Tenant)
+CREATE TABLE IF NOT EXISTS public.stores (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  nama_toko TEXT NOT NULL,
+  alamat_toko TEXT,
+  no_hp TEXT,
+  email_pemilik TEXT,
+  logo_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 3. TABLE: STORE_MEMBERS (Relasi Pengguna / Kasir / Admin ke Toko)
+CREATE TABLE IF NOT EXISTS public.store_members (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  user_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'kasir',
+  status TEXT NOT NULL DEFAULT 'aktif',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, store_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_members_store ON public.store_members(store_id);
+CREATE INDEX IF NOT EXISTS idx_store_members_user ON public.store_members(user_id);
+
+-- 4. TABLE: PROFILES (Profil Pengguna POS & Multi Device)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id TEXT PRIMARY KEY,
+  email TEXT,
+  display_name TEXT,
+  photo_url TEXT,
+  role TEXT DEFAULT 'owner',
+  store_id TEXT DEFAULT 'default_store',
+  nama_toko TEXT,
+  no_hp TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 5. TABLE: PRODUCTS (Data Produk Sembako, Kategori, Stok & Barcode)
 CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-  kode TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL DEFAULT 'default_store',
+  kode TEXT NOT NULL,
   barcode TEXT,
   nama TEXT NOT NULL,
   kategori TEXT NOT NULL DEFAULT 'Sembako & Bumbu',
@@ -300,42 +492,57 @@ CREATE TABLE IF NOT EXISTS public.products (
   min_stok NUMERIC(12,2) NOT NULL DEFAULT 5,
   terjual NUMERIC(12,2) NOT NULL DEFAULT 0,
   supplier TEXT DEFAULT 'Distributor Utama',
+  gambar_url TEXT,
+  deskripsi TEXT,
+  expired_date TEXT,
+  batch_no TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Index for fast POS search
+-- Multi-Tenant Indexes for Fast Search
+CREATE INDEX IF NOT EXISTS idx_products_store_id ON public.products(store_id);
 CREATE INDEX IF NOT EXISTS idx_products_kode ON public.products(kode);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_nama ON public.products(nama);
 
--- 3. TABLE: TRANSACTIONS (Transaksi Penjualan Kasir POS)
+-- 6. TABLE: TRANSACTIONS (Transaksi Penjualan Kasir POS)
 CREATE TABLE IF NOT EXISTS public.transactions (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-  kode_transaksi TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL DEFAULT 'default_store',
+  kode_transaksi TEXT NOT NULL,
   tanggal TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   subtotal NUMERIC(15,2) NOT NULL DEFAULT 0,
   diskon_total NUMERIC(15,2) NOT NULL DEFAULT 0,
   pajak_persen NUMERIC(5,2) NOT NULL DEFAULT 0,
   pajak_nominal NUMERIC(15,2) NOT NULL DEFAULT 0,
   total_harga NUMERIC(15,2) NOT NULL DEFAULT 0,
+  total_refund NUMERIC(15,2) NOT NULL DEFAULT 0,
   bayar NUMERIC(15,2) NOT NULL DEFAULT 0,
   kembalian NUMERIC(15,2) NOT NULL DEFAULT 0,
   metode_pembayaran TEXT NOT NULL DEFAULT 'tunai',
   status_pembayaran TEXT NOT NULL DEFAULT 'lunas',
+  bank_nama TEXT,
+  no_referensi TEXT,
+  nama_pelanggan TEXT,
   kasir_nama TEXT DEFAULT 'Kasir Utama',
   catatan TEXT,
+  alasan_retur TEXT,
+  retur_at TIMESTAMPTZ,
+  riwayat_retur JSONB NOT NULL DEFAULT '[]'::jsonb,
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Index for transaction queries
+CREATE INDEX IF NOT EXISTS idx_tx_store_id ON public.transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_tx_tanggal ON public.transactions(tanggal);
+CREATE INDEX IF NOT EXISTS idx_tx_kode ON public.transactions(kode_transaksi);
 CREATE INDEX IF NOT EXISTS idx_tx_status ON public.transactions(status_pembayaran);
 
--- 4. TABLE: CRM_USERS (Akun Toko, Lisensi CRM & Limit Perangkat)
+-- 7. TABLE: CRM_USERS (Akun Toko, Lisensi CRM & Limit Perangkat)
 CREATE TABLE IF NOT EXISTS public.crm_users (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  store_id TEXT DEFAULT 'default_store',
   nama_pemilik TEXT NOT NULL,
   nama_toko TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
@@ -355,30 +562,13 @@ CREATE TABLE IF NOT EXISTS public.crm_users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5. TABLE: WEBHOOK_LOGS (Log Pesan WhatsApp Masuk & Bot Stok)
-CREATE TABLE IF NOT EXISTS public.webhook_logs (
-  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-  sender TEXT NOT NULL,
-  message_text TEXT,
-  raw_body JSONB,
-  status TEXT NOT NULL DEFAULT 'success',
-  action_taken TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE INDEX IF NOT EXISTS idx_crm_store_id ON public.crm_users(store_id);
 
--- 6. TABLE: REMOTE_CONFIG (Konfigurasi Live CMS & Branding)
-CREATE TABLE IF NOT EXISTS public.remote_config (
-  id TEXT PRIMARY KEY DEFAULT 'app_master_config',
-  config JSONB NOT NULL,
-  version INT NOT NULL DEFAULT 1,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_by TEXT DEFAULT 'Super Admin'
-);
-
--- 7. TABLE: SUPPLIERS (Data Pemasok & Distributor Sembako)
+-- 8. TABLE: SUPPLIERS (Data Pemasok & Distributor Sembako)
 CREATE TABLE IF NOT EXISTS public.suppliers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-  kode_supplier TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL DEFAULT 'default_store',
+  kode_supplier TEXT NOT NULL,
   nama_supplier TEXT NOT NULL,
   kontak_person TEXT,
   telepon TEXT,
@@ -391,9 +581,12 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 8. TABLE: STOCK_MOVEMENTS (Riwayat Mutasi Stok Masuk, Keluar, Penyesuaian)
+CREATE INDEX IF NOT EXISTS idx_suppliers_store_id ON public.suppliers(store_id);
+
+-- 9. TABLE: STOCK_MOVEMENTS (Riwayat Mutasi Stok Masuk, Keluar, Penyesuaian)
 CREATE TABLE IF NOT EXISTS public.stock_movements (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  store_id TEXT NOT NULL DEFAULT 'default_store',
   produk_id TEXT NOT NULL,
   nama_produk TEXT NOT NULL,
   kode_produk TEXT,
@@ -409,10 +602,22 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 9. TABLE: STOCK_OPNAMES (Audit Fisik Stok Toko)
+CREATE INDEX IF NOT EXISTS idx_stock_movements_store_id ON public.stock_movements(store_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_produk ON public.stock_movements(produk_id);
+
+-- 10. TABLE: STOCK_OPNAMES (Audit Fisik Stok Toko)
 CREATE TABLE IF NOT EXISTS public.stock_opnames (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  store_id TEXT NOT NULL DEFAULT 'default_store',
   tanggal DATE NOT NULL DEFAULT CURRENT_DATE,
+  produk_id TEXT,
+  nama_produk TEXT,
+  kode_produk TEXT,
+  stok_sistem NUMERIC(12,2) DEFAULT 0,
+  stok_fisik NUMERIC(12,2) DEFAULT 0,
+  selisih NUMERIC(12,2) DEFAULT 0,
+  alasan TEXT,
+  status TEXT DEFAULT 'selesai',
   keterangan TEXT,
   operator TEXT DEFAULT 'Admin Toko',
   total_selisih_nominal NUMERIC(15,2) NOT NULL DEFAULT 0,
@@ -420,10 +625,13 @@ CREATE TABLE IF NOT EXISTS public.stock_opnames (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 10. TABLE: STAFF_ACCOUNTS (Akun Admin & Kasir Toko)
+CREATE INDEX IF NOT EXISTS idx_stock_opnames_store_id ON public.stock_opnames(store_id);
+
+-- 11. TABLE: STAFF_ACCOUNTS (Akun Admin & Kasir Toko)
 CREATE TABLE IF NOT EXISTS public.staff_accounts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-  username TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL DEFAULT 'default_store',
+  username TEXT NOT NULL,
   nama TEXT NOT NULL,
   password TEXT NOT NULL DEFAULT 'password123',
   role TEXT NOT NULL DEFAULT 'kasir',
@@ -435,20 +643,55 @@ CREATE TABLE IF NOT EXISTS public.staff_accounts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS) & Public Access Policies for API
+CREATE INDEX IF NOT EXISTS idx_staff_store_id ON public.staff_accounts(store_id);
+
+-- 12. TABLE: REMOTE_CONFIG & WEBHOOK_LOGS
+CREATE TABLE IF NOT EXISTS public.remote_config (
+  id TEXT PRIMARY KEY DEFAULT 'app_master_config',
+  config JSONB NOT NULL,
+  version INT NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT DEFAULT 'Super Admin'
+);
+
+CREATE TABLE IF NOT EXISTS public.webhook_logs (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  sender TEXT NOT NULL,
+  message_text TEXT,
+  raw_body JSONB,
+  status TEXT NOT NULL DEFAULT 'success',
+  action_taken TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =========================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- =========================================================================
+ALTER TABLE public.stores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.store_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.crm_users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.remote_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_opnames ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.staff_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.remote_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
 
--- Allow anon read & write with API key
+-- Allow access with public API / anon key
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Stores') THEN
+    CREATE POLICY "Public Access Stores" ON public.stores FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Store Members') THEN
+    CREATE POLICY "Public Access Store Members" ON public.store_members FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Profiles') THEN
+    CREATE POLICY "Public Access Profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Products') THEN
     CREATE POLICY "Public Access Products" ON public.products FOR ALL USING (true) WITH CHECK (true);
   END IF;
@@ -461,12 +704,6 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Staff Accounts') THEN
     CREATE POLICY "Public Access Staff Accounts" ON public.staff_accounts FOR ALL USING (true) WITH CHECK (true);
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Webhook Logs') THEN
-    CREATE POLICY "Public Access Webhook Logs" ON public.webhook_logs FOR ALL USING (true) WITH CHECK (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Remote Config') THEN
-    CREATE POLICY "Public Access Remote Config" ON public.remote_config FOR ALL USING (true) WITH CHECK (true);
-  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Suppliers') THEN
     CREATE POLICY "Public Access Suppliers" ON public.suppliers FOR ALL USING (true) WITH CHECK (true);
   END IF;
@@ -476,5 +713,54 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Stock Opnames') THEN
     CREATE POLICY "Public Access Stock Opnames" ON public.stock_opnames FOR ALL USING (true) WITH CHECK (true);
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Remote Config') THEN
+    CREATE POLICY "Public Access Remote Config" ON public.remote_config FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Webhook Logs') THEN
+    CREATE POLICY "Public Access Webhook Logs" ON public.webhook_logs FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+-- =========================================================================
+-- REALTIME REPLICATION PUBLICATION SETUP
+-- Mengaktifkan event perubahan data langsung ke seluruh browser / perangkat
+-- =========================================================================
+DO $$
+BEGIN
+  -- Add tables to supabase_realtime publication
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.stock_movements;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.stock_opnames;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.suppliers;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.crm_users;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.staff_accounts;
+  EXCEPTION WHEN others THEN NULL;
+  END;
 END $$;
 `;
