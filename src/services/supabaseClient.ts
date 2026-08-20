@@ -609,12 +609,6 @@ CREATE TABLE IF NOT EXISTS public.products (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Multi-Tenant Indexes for Fast Search
-CREATE INDEX IF NOT EXISTS idx_products_store_id ON public.products(store_id);
-CREATE INDEX IF NOT EXISTS idx_products_kode ON public.products(kode);
-CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
-CREATE INDEX IF NOT EXISTS idx_products_nama ON public.products(nama);
-
 -- 6. TABLE: TRANSACTIONS (Transaksi Penjualan Kasir POS)
 CREATE TABLE IF NOT EXISTS public.transactions (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
@@ -643,11 +637,6 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_tx_store_id ON public.transactions(store_id);
-CREATE INDEX IF NOT EXISTS idx_tx_tanggal ON public.transactions(tanggal);
-CREATE INDEX IF NOT EXISTS idx_tx_kode ON public.transactions(kode_transaksi);
-CREATE INDEX IF NOT EXISTS idx_tx_status ON public.transactions(status_pembayaran);
-
 -- 7. TABLE: CRM_USERS (Akun Toko, Lisensi CRM & Limit Perangkat)
 CREATE TABLE IF NOT EXISTS public.crm_users (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
@@ -671,8 +660,6 @@ CREATE TABLE IF NOT EXISTS public.crm_users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_crm_store_id ON public.crm_users(store_id);
-
 -- 8. TABLE: SUPPLIERS (Data Pemasok & Distributor Sembako)
 CREATE TABLE IF NOT EXISTS public.suppliers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
@@ -689,8 +676,6 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS idx_suppliers_store_id ON public.suppliers(store_id);
 
 -- 9. TABLE: STOCK_MOVEMENTS (Riwayat Mutasi Stok Masuk, Keluar, Penyesuaian)
 CREATE TABLE IF NOT EXISTS public.stock_movements (
@@ -710,9 +695,6 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
   operator TEXT DEFAULT 'Admin Toko',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS idx_stock_movements_store_id ON public.stock_movements(store_id);
-CREATE INDEX IF NOT EXISTS idx_stock_movements_produk ON public.stock_movements(produk_id);
 
 -- 10. TABLE: STOCK_OPNAMES (Audit Fisik Stok Toko)
 CREATE TABLE IF NOT EXISTS public.stock_opnames (
@@ -734,8 +716,6 @@ CREATE TABLE IF NOT EXISTS public.stock_opnames (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_stock_opnames_store_id ON public.stock_opnames(store_id);
-
 -- 11. TABLE: STAFF_ACCOUNTS (Akun Admin & Kasir Toko)
 CREATE TABLE IF NOT EXISTS public.staff_accounts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
@@ -751,8 +731,6 @@ CREATE TABLE IF NOT EXISTS public.staff_accounts (
   last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS idx_staff_store_id ON public.staff_accounts(store_id);
 
 -- 12. TABLE: REMOTE_CONFIG & WEBHOOK_LOGS
 CREATE TABLE IF NOT EXISTS public.remote_config (
@@ -772,6 +750,131 @@ CREATE TABLE IF NOT EXISTS public.webhook_logs (
   action_taken TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- =========================================================================
+-- AUTO MIGRATION: Pastikan kolom store_id dan kolom tambahan ada di tabel lama
+-- (Mencegah error 42703 bila tabel sudah pernah dibuat sebelumnya)
+-- =========================================================================
+DO $$
+BEGIN
+  -- 1. products
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'products') THEN
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS store_id TEXT NOT NULL DEFAULT 'default_store';
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS barcode TEXT;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS min_stok NUMERIC(12,2) NOT NULL DEFAULT 5;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS terjual NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS supplier TEXT DEFAULT 'Distributor Utama';
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS gambar_url TEXT;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS deskripsi TEXT;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS expired_date TEXT;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS batch_no TEXT;
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE public.products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 2. transactions
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transactions') THEN
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS store_id TEXT NOT NULL DEFAULT 'default_store';
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS total_refund NUMERIC(15,2) NOT NULL DEFAULT 0;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS pajak_persen NUMERIC(5,2) NOT NULL DEFAULT 0;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS pajak_nominal NUMERIC(15,2) NOT NULL DEFAULT 0;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS metode_pembayaran TEXT NOT NULL DEFAULT 'tunai';
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS status_pembayaran TEXT NOT NULL DEFAULT 'lunas';
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS bank_nama TEXT;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS no_referensi TEXT;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS nama_pelanggan TEXT;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS kasir_nama TEXT DEFAULT 'Kasir Utama';
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS catatan TEXT;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS alasan_retur TEXT;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS retur_at TIMESTAMPTZ;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS riwayat_retur JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 3. suppliers
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'suppliers') THEN
+    ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS store_id TEXT NOT NULL DEFAULT 'default_store';
+    ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS kategori_produk TEXT DEFAULT 'Umum';
+    ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS catatan TEXT;
+    ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'aktif';
+    ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 4. stock_movements
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'stock_movements') THEN
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS store_id TEXT NOT NULL DEFAULT 'default_store';
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS kode_produk TEXT;
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS supplier TEXT;
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS expired_date TEXT;
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS batch_no TEXT;
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS operator TEXT DEFAULT 'Admin Toko';
+    ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 5. stock_opnames
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'stock_opnames') THEN
+    ALTER TABLE public.stock_opnames ADD COLUMN IF NOT EXISTS store_id TEXT NOT NULL DEFAULT 'default_store';
+    ALTER TABLE public.stock_opnames ADD COLUMN IF NOT EXISTS total_selisih_nominal NUMERIC(15,2) NOT NULL DEFAULT 0;
+    ALTER TABLE public.stock_opnames ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE public.stock_opnames ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 6. staff_accounts
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'staff_accounts') THEN
+    ALTER TABLE public.staff_accounts ADD COLUMN IF NOT EXISTS store_id TEXT NOT NULL DEFAULT 'default_store';
+    ALTER TABLE public.staff_accounts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'aktif';
+    ALTER TABLE public.staff_accounts ADD COLUMN IF NOT EXISTS catatan TEXT;
+    ALTER TABLE public.staff_accounts ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ;
+    ALTER TABLE public.staff_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 7. crm_users
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'crm_users') THEN
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS store_id TEXT DEFAULT 'default_store';
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS device_limit INT NOT NULL DEFAULT 3;
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS active_devices_count INT NOT NULL DEFAULT 1;
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS license_key TEXT;
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'basic';
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'aktif';
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner';
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS notes TEXT;
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE public.crm_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+
+  -- 8. profiles
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'profiles') THEN
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS store_id TEXT DEFAULT 'default_store';
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'owner';
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS nama_toko TEXT;
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS no_hp TEXT;
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  END IF;
+END $$;
+
+-- =========================================================================
+-- CREATE PERFORMANCE & PARTITION INDEXES
+-- =========================================================================
+CREATE INDEX IF NOT EXISTS idx_products_store_id ON public.products(store_id);
+CREATE INDEX IF NOT EXISTS idx_products_kode ON public.products(kode);
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
+CREATE INDEX IF NOT EXISTS idx_products_nama ON public.products(nama);
+
+CREATE INDEX IF NOT EXISTS idx_tx_store_id ON public.transactions(store_id);
+CREATE INDEX IF NOT EXISTS idx_tx_tanggal ON public.transactions(tanggal);
+CREATE INDEX IF NOT EXISTS idx_tx_kode ON public.transactions(kode_transaksi);
+CREATE INDEX IF NOT EXISTS idx_tx_status ON public.transactions(status_pembayaran);
+
+CREATE INDEX IF NOT EXISTS idx_crm_store_id ON public.crm_users(store_id);
+CREATE INDEX IF NOT EXISTS idx_suppliers_store_id ON public.suppliers(store_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_store_id ON public.stock_movements(store_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_produk ON public.stock_movements(produk_id);
+CREATE INDEX IF NOT EXISTS idx_stock_opnames_store_id ON public.stock_opnames(store_id);
+CREATE INDEX IF NOT EXISTS idx_staff_store_id ON public.staff_accounts(store_id);
 
 -- =========================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
