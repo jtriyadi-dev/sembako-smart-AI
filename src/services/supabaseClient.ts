@@ -312,6 +312,21 @@ CREATE TABLE IF NOT EXISTS public.stock_opnames (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 10. TABLE: STAFF_ACCOUNTS (Akun Admin & Kasir Toko)
+CREATE TABLE IF NOT EXISTS public.staff_accounts (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+  username TEXT NOT NULL UNIQUE,
+  nama TEXT NOT NULL,
+  password TEXT NOT NULL DEFAULT 'password123',
+  role TEXT NOT NULL DEFAULT 'kasir',
+  no_hp TEXT,
+  email TEXT,
+  status TEXT NOT NULL DEFAULT 'aktif',
+  catatan TEXT,
+  last_login TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Enable Row Level Security (RLS) & Public Access Policies for API
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
@@ -321,6 +336,7 @@ ALTER TABLE public.remote_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_opnames ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.staff_accounts ENABLE ROW LEVEL SECURITY;
 
 -- Allow anon read & write with API key
 DO $$
@@ -333,6 +349,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access CRM Users') THEN
     CREATE POLICY "Public Access CRM Users" ON public.crm_users FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Staff Accounts') THEN
+    CREATE POLICY "Public Access Staff Accounts" ON public.staff_accounts FOR ALL USING (true) WITH CHECK (true);
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Webhook Logs') THEN
     CREATE POLICY "Public Access Webhook Logs" ON public.webhook_logs FOR ALL USING (true) WITH CHECK (true);

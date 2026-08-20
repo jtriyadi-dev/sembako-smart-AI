@@ -585,7 +585,7 @@ async function startServer() {
   });
 
   // 7c. POST /api/auth/crm-login & /api/auth/login - Master Unified Login
-  const handleUnifiedLogin = (req: express.Request, res: express.Response) => {
+  const handleUnifiedLogin = async (req: express.Request, res: express.Response) => {
     try {
       const { email, username, identifier, password } = req.body || {};
       const cleanId = (identifier || email || username || '').trim();
@@ -595,7 +595,7 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "Email/Username dan password wajib diisi." });
       }
 
-      const authResult = authenticateUserBackend(cleanId, cleanPass);
+      const authResult = await authenticateUserBackend(cleanId, cleanPass);
       if (!authResult.success) {
         return res.status(401).json({ success: false, message: authResult.message || "Email atau kata sandi tidak cocok." });
       }

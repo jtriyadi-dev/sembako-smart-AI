@@ -1,5 +1,6 @@
 import { RemoteAppConfig, CrmUser, DeveloperApiKeys } from '../types';
 import { DEFAULT_REMOTE_CONFIG, INITIAL_CRM_USERS, DEFAULT_API_KEYS } from '../data/defaultRemoteConfig';
+import { getSupabaseClient } from './supabaseClient';
 
 const LOCAL_STORAGE_REMOTE_CONFIG = 'sembako_remote_config_v2';
 const LOCAL_STORAGE_CRM_USERS = 'sembako_crm_users_v2';
@@ -115,6 +116,7 @@ export async function saveRemoteConfig(
 // ==========================================
 
 export async function fetchCrmUsers(devSecret: string = ''): Promise<CrmUser[]> {
+  let serverUsers: CrmUser[] = [];
   try {
     const { ok, data } = await safeJsonFetch('/api/developer/users', {
       headers: {
@@ -123,13 +125,52 @@ export async function fetchCrmUsers(devSecret: string = ''): Promise<CrmUser[]> 
       },
       signal: AbortSignal.timeout(3000)
     });
-    if (ok && data && Array.isArray(data.users)) {
-      try {
-        localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(data.users));
-      } catch (e) {}
-      return data.users;
+    if (ok && data && Array.isArray(data.users) && data.users.length > 0) {
+      serverUsers = data.users;
     }
   } catch (err) {}
+
+  // Also query Supabase directly from client if available
+  try {
+    const sbClient = getSupabaseClient();
+    if (sbClient) {
+      const { data: sbUsers } = await sbClient.from('crm_users').select('*').order('created_at', { ascending: false });
+      if (Array.isArray(sbUsers) && sbUsers.length > 0) {
+        const mapped: CrmUser[] = sbUsers.map(r => ({
+          id: String(r.id),
+          namaPemilik: r.nama_pemilik || 'Pelanggan Toko',
+          namaToko: r.nama_toko || 'Toko Sembako',
+          email: r.email || '',
+          password: r.password || 'password123',
+          noHp: r.no_hp || '',
+          alamatToko: r.alamat_toko || '',
+          plan: r.plan || 'pro_lifetime',
+          status: r.status || 'aktif',
+          licenseKey: r.license_key || `SBK-PRO-${String(r.id).substring(0, 4).toUpperCase()}`,
+          deviceLimit: Number(r.device_limit) || 3,
+          activeDevicesCount: Number(r.active_devices_count) || 0,
+          role: r.role || 'owner',
+          notes: r.notes || '',
+          createdAt: r.created_at || new Date().toISOString(),
+          updatedAt: r.updated_at || new Date().toISOString(),
+          expiresAt: r.expires_at || null,
+          totalTransactions: 0
+        }));
+
+        const mergedMap = new Map<string, CrmUser>();
+        serverUsers.forEach(u => { if (u.email) mergedMap.set(u.email.toLowerCase(), u); });
+        mapped.forEach(u => { if (u.email) mergedMap.set(u.email.toLowerCase(), u); });
+        serverUsers = Array.from(mergedMap.values());
+      }
+    }
+  } catch (e) {}
+
+  if (serverUsers.length > 0) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(serverUsers));
+    } catch (e) {}
+    return serverUsers;
+  }
 
   // Fallback to local storage
   try {
@@ -154,7 +195,7 @@ export async function saveCrmUser(
   let updatedUser: CrmUser;
 
   if (user.id) {
-    const existingIdx = users.findIndex(u => u.id === user.id);
+    const existingIdx = users.findIndex(u => u.id === user.id || (user.email && u.email?.toLowerCase() === user.email.toLowerCase()));
     if (existingIdx >= 0) {
       updatedUser = {
         ...users[existingIdx],
@@ -206,7 +247,7 @@ export async function saveCrmUser(
     localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(users));
   } catch (e) {}
 
-  // Push to server
+  // 1. Push to server backend
   try {
     await fetch('/api/developer/users', {
       method: 'POST',
@@ -218,6 +259,32 @@ export async function saveCrmUser(
       signal: AbortSignal.timeout(4000)
     });
   } catch (err) {}
+
+  // 2. Direct client-side Supabase upsert for instant multi-device syncing
+  try {
+    const sbClient = getSupabaseClient();
+    if (sbClient) {
+      await sbClient.from('crm_users').upsert({
+        id: updatedUser.id,
+        nama_pemilik: updatedUser.namaPemilik,
+        nama_toko: updatedUser.namaToko,
+        email: updatedUser.email,
+        password: updatedUser.password,
+        no_hp: updatedUser.noHp,
+        alamat_toko: updatedUser.alamatToko,
+        plan: updatedUser.plan,
+        status: updatedUser.status,
+        license_key: updatedUser.licenseKey,
+        device_limit: updatedUser.deviceLimit,
+        role: updatedUser.role,
+        notes: updatedUser.notes,
+        expires_at: updatedUser.expiresAt,
+        updated_at: updatedUser.updatedAt
+      });
+    }
+  } catch (err) {
+    console.warn('[devCrmService] Supabase client upsert error:', err);
+  }
 
   return {
     success: true,
@@ -245,6 +312,13 @@ export async function deleteCrmUser(
       },
       signal: AbortSignal.timeout(4000)
     });
+  } catch (e) {}
+
+  try {
+    const sbClient = getSupabaseClient();
+    if (sbClient) {
+      await sbClient.from('crm_users').delete().eq('id', userId);
+    }
   } catch (e) {}
 
   return {

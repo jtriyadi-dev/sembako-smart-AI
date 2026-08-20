@@ -102,6 +102,8 @@ export function saveRemoteConfigBackend(config: RemoteAppConfig): RemoteAppConfi
 }
 
 export function getCrmUsersBackend(): CrmUser[] {
+  // Background refresh from Supabase
+  fetchCrmUsersFromSupabaseBackend().catch(() => {});
   return [...inMemoryCrmUsers];
 }
 
@@ -117,6 +119,11 @@ export function saveCrmUserBackend(user: CrmUser): CrmUser {
     inMemoryCrmUsers.unshift(saved);
   }
   saveDeveloperStoresToFile();
+
+  // Multi-cloud persistent sync: Supabase + Firestore
+  syncCrmUserToSupabaseBackend(saved).catch(() => {});
+  syncCrmUserToFirestore(saved).catch(() => {});
+
   return saved;
 }
 
@@ -124,10 +131,12 @@ export function deleteCrmUserBackend(userId: string): boolean {
   const initialLen = inMemoryCrmUsers.length;
   inMemoryCrmUsers = inMemoryCrmUsers.filter(u => u.id !== userId);
   saveDeveloperStoresToFile();
+  deleteCrmUserFromSupabaseBackend(userId).catch(() => {});
   return inMemoryCrmUsers.length < initialLen;
 }
 
 export function getStaffBackend(): StaffAccount[] {
+  fetchStaffFromSupabaseBackend().catch(() => {});
   return [...inMemoryStaffAccounts];
 }
 
@@ -144,6 +153,7 @@ export function saveStaffBackend(staff: StaffAccount): StaffAccount {
     inMemoryStaffAccounts.unshift(saved);
   }
   saveDeveloperStoresToFile();
+  syncStaffToSupabaseBackend(saved).catch(() => {});
   return saved;
 }
 
@@ -151,11 +161,250 @@ export function deleteStaffBackend(staffId: string): boolean {
   const initialLen = inMemoryStaffAccounts.length;
   inMemoryStaffAccounts = inMemoryStaffAccounts.filter(s => s.id !== staffId);
   saveDeveloperStoresToFile();
+  deleteStaffFromSupabaseBackend(staffId).catch(() => {});
   return inMemoryStaffAccounts.length < initialLen;
 }
 
-// Master Unified Server-Side Auth Resolver
-export function authenticateUserBackend(identifier: string, password: string): { success: boolean; message?: string; user?: any; role?: string } {
+// Supabase and Firestore CRM & Staff Cloud Synchronization
+export async function syncCrmUserToSupabaseBackend(u: CrmUser): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const payload = {
+      id: u.id,
+      nama_pemilik: u.namaPemilik,
+      nama_toko: u.namaToko,
+      email: u.email,
+      password: u.password || 'password123',
+      no_hp: u.noHp || null,
+      alamat_toko: u.alamatToko || null,
+      plan: u.plan || 'pro_lifetime',
+      status: u.status || 'aktif',
+      license_key: u.licenseKey || null,
+      device_limit: u.deviceLimit || 3,
+      active_devices_count: u.activeDevicesCount || 1,
+      role: u.role || 'owner',
+      notes: u.notes || null,
+      expires_at: u.expiresAt || null,
+      created_at: u.createdAt || new Date().toISOString(),
+      updated_at: u.updatedAt || new Date().toISOString()
+    };
+
+    const res = await fetch(`${sb.url}/rest/v1/crm_users`, {
+      method: 'POST',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4000)
+    });
+    return res.ok;
+  } catch (err: any) {
+    console.warn('[BackendStore Supabase CRM Sync Error]:', err?.message);
+    return false;
+  }
+}
+
+export async function deleteCrmUserFromSupabaseBackend(userId: string): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/crm_users?id=eq.${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function fetchCrmUsersFromSupabaseBackend(): Promise<CrmUser[]> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return inMemoryCrmUsers;
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/crm_users?select=*&order=created_at.desc`, {
+      method: 'GET',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!res.ok) return inMemoryCrmUsers;
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0) {
+      const mapped: CrmUser[] = rows.map((r: any) => ({
+        id: String(r.id),
+        namaPemilik: r.nama_pemilik || 'Pelanggan Toko',
+        namaToko: r.nama_toko || 'Toko Sembako',
+        email: r.email || '',
+        password: r.password || 'password123',
+        noHp: r.no_hp || '',
+        alamatToko: r.alamat_toko || '',
+        plan: r.plan || 'pro_lifetime',
+        status: r.status || 'aktif',
+        licenseKey: r.license_key || `SBK-PRO-${String(r.id).substring(0, 4).toUpperCase()}`,
+        deviceLimit: Number(r.device_limit) || 3,
+        activeDevicesCount: Number(r.active_devices_count) || 0,
+        role: r.role || 'owner',
+        notes: r.notes || '',
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString(),
+        expiresAt: r.expires_at || null,
+        totalTransactions: 0
+      }));
+
+      // Merge with inMemoryCrmUsers
+      const mergedMap = new Map<string, CrmUser>();
+      inMemoryCrmUsers.forEach(u => {
+        if (u.email) mergedMap.set(u.email.toLowerCase(), u);
+      });
+      mapped.forEach(u => {
+        if (u.email) mergedMap.set(u.email.toLowerCase(), u);
+      });
+      inMemoryCrmUsers = Array.from(mergedMap.values());
+      saveDeveloperStoresToFile();
+      return inMemoryCrmUsers;
+    }
+  } catch (err: any) {
+    console.warn('[BackendStore Supabase CRM Fetch Error]:', err?.message);
+  }
+  return inMemoryCrmUsers;
+}
+
+export async function syncStaffToSupabaseBackend(s: StaffAccount): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const payload = {
+      id: s.id,
+      username: s.username,
+      nama: s.nama,
+      password: s.password || 'password123',
+      role: s.role || 'kasir',
+      no_hp: s.noHp || null,
+      email: s.email || null,
+      status: s.status || 'aktif',
+      catatan: s.catatan || null,
+      last_login: s.lastLogin || null,
+      created_at: s.createdAt || new Date().toISOString()
+    };
+
+    const res = await fetch(`${sb.url}/rest/v1/staff_accounts`, {
+      method: 'POST',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4000)
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function deleteStaffFromSupabaseBackend(staffId: string): Promise<boolean> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return false;
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/staff_accounts?id=eq.${encodeURIComponent(staffId)}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function fetchStaffFromSupabaseBackend(): Promise<StaffAccount[]> {
+  const sb = getSupabaseConfigBackend();
+  if (!sb) return inMemoryStaffAccounts;
+  try {
+    const res = await fetch(`${sb.url}/rest/v1/staff_accounts?select=*&order=created_at.desc`, {
+      method: 'GET',
+      headers: {
+        apikey: sb.key,
+        Authorization: `Bearer ${sb.key}`,
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!res.ok) return inMemoryStaffAccounts;
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0) {
+      const mapped: StaffAccount[] = rows.map((r: any) => ({
+        id: String(r.id),
+        username: r.username,
+        nama: r.nama,
+        password: r.password || 'password123',
+        role: r.role || 'kasir',
+        noHp: r.no_hp || '',
+        email: r.email || '',
+        status: r.status || 'aktif',
+        catatan: r.catatan || '',
+        lastLogin: r.last_login || null,
+        createdAt: r.created_at || new Date().toISOString()
+      }));
+
+      const mergedMap = new Map<string, StaffAccount>();
+      inMemoryStaffAccounts.forEach(s => mergedMap.set(s.username.toLowerCase(), s));
+      mapped.forEach(s => mergedMap.set(s.username.toLowerCase(), s));
+      inMemoryStaffAccounts = Array.from(mergedMap.values());
+      saveDeveloperStoresToFile();
+      return inMemoryStaffAccounts;
+    }
+  } catch (e) {}
+  return inMemoryStaffAccounts;
+}
+
+async function syncCrmUserToFirestore(u: CrmUser): Promise<void> {
+  try {
+    const postUrl = `${BASE_FIRESTORE_URL}/crm_users/${encodeURIComponent(u.id)}?key=${FIREBASE_API_KEY}`;
+    await fetch(postUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: toFirestoreFields({
+          id: u.id,
+          namaPemilik: u.namaPemilik,
+          namaToko: u.namaToko,
+          email: u.email,
+          password: u.password || 'password123',
+          noHp: u.noHp || '',
+          alamatToko: u.alamatToko || '',
+          plan: u.plan || 'pro_lifetime',
+          status: u.status || 'aktif',
+          licenseKey: u.licenseKey || '',
+          deviceLimit: u.deviceLimit || 3,
+          role: u.role || 'owner',
+          notes: u.notes || '',
+          createdAt: u.createdAt || new Date().toISOString(),
+          updatedAt: u.updatedAt || new Date().toISOString()
+        })
+      }),
+      signal: AbortSignal.timeout(3000)
+    });
+  } catch (e) {}
+}
+
+// Master Unified Server-Side Auth Resolver (with Real-Time Supabase & Firestore Cloud Database Lookup)
+export async function authenticateUserBackend(identifier: string, password: string): Promise<{ success: boolean; message?: string; user?: any; role?: string }> {
   const cleanId = (identifier || '').trim().toLowerCase();
   const cleanPass = (password || '').trim();
 
@@ -189,12 +438,103 @@ export function authenticateUserBackend(identifier: string, password: string): {
     }
   }
 
-  // 2. CRM Users (Owners, Enterprise, etc.)
-  const foundCrm = inMemoryCrmUsers.find(u => 
+  // 2. CRM Users (Check Memory first, then query Supabase in real-time)
+  let foundCrm = inMemoryCrmUsers.find(u => 
     (u.email && u.email.trim().toLowerCase() === cleanId) ||
     (u.namaPemilik && u.namaPemilik.trim().toLowerCase() === cleanId) ||
     (u.noHp && u.noHp.trim() === cleanId)
   );
+
+  // If not found in memory, query Supabase Cloud Database directly
+  if (!foundCrm) {
+    const sb = getSupabaseConfigBackend();
+    if (sb) {
+      try {
+        const queryUrl = `${sb.url}/rest/v1/crm_users?or=(email.ilike.${encodeURIComponent(cleanId)},no_hp.eq.${encodeURIComponent(cleanId)})&limit=1`;
+        const res = await fetch(queryUrl, {
+          headers: {
+            apikey: sb.key,
+            Authorization: `Bearer ${sb.key}`,
+          },
+          signal: AbortSignal.timeout(3000)
+        });
+        if (res.ok) {
+          const rows = await res.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const r = rows[0];
+            foundCrm = {
+              id: String(r.id),
+              namaPemilik: r.nama_pemilik || 'Pelanggan Toko',
+              namaToko: r.nama_toko || 'Toko Sembako',
+              email: r.email || '',
+              password: r.password || 'password123',
+              noHp: r.no_hp || '',
+              alamatToko: r.alamat_toko || '',
+              plan: r.plan || 'pro_lifetime',
+              status: r.status || 'aktif',
+              licenseKey: r.license_key || `SBK-PRO-${String(r.id).substring(0, 4).toUpperCase()}`,
+              deviceLimit: Number(r.device_limit) || 3,
+              activeDevicesCount: Number(r.active_devices_count) || 0,
+              role: r.role || 'owner',
+              notes: r.notes || '',
+              createdAt: r.created_at || new Date().toISOString(),
+              updatedAt: r.updated_at || new Date().toISOString(),
+              expiresAt: r.expires_at || null,
+              totalTransactions: 0
+            };
+            inMemoryCrmUsers.unshift(foundCrm);
+            saveDeveloperStoresToFile();
+          }
+        }
+      } catch (err: any) {
+        console.warn('[BackendStore Supabase Single User Auth Error]:', err?.message);
+      }
+    }
+  }
+
+  // If still not found, check Firestore CRM collection
+  if (!foundCrm) {
+    try {
+      const fsRes = await fetch(`${BASE_FIRESTORE_URL}/crm_users?key=${FIREBASE_API_KEY}`, {
+        signal: AbortSignal.timeout(2500)
+      });
+      if (fsRes.ok) {
+        const fsData = await fsRes.json();
+        if (fsData && Array.isArray(fsData.documents)) {
+          for (const doc of fsData.documents) {
+            const fields = doc.fields || {};
+            const docEmail = parseFirestoreField(fields.email) || '';
+            const docHp = parseFirestoreField(fields.noHp) || '';
+            if (docEmail.toLowerCase() === cleanId || docHp === cleanId) {
+              foundCrm = {
+                id: parseFirestoreField(fields.id) || doc.name.split('/').pop(),
+                namaPemilik: parseFirestoreField(fields.namaPemilik) || 'Pelanggan Toko',
+                namaToko: parseFirestoreField(fields.namaToko) || 'Toko Sembako',
+                email: docEmail,
+                password: parseFirestoreField(fields.password) || 'password123',
+                noHp: docHp,
+                alamatToko: parseFirestoreField(fields.alamatToko) || '',
+                plan: parseFirestoreField(fields.plan) || 'pro_lifetime',
+                status: parseFirestoreField(fields.status) || 'aktif',
+                licenseKey: parseFirestoreField(fields.licenseKey) || 'SBK-PRO-001',
+                deviceLimit: parseFirestoreField(fields.deviceLimit) || 3,
+                activeDevicesCount: 1,
+                role: parseFirestoreField(fields.role) || 'owner',
+                notes: parseFirestoreField(fields.notes) || '',
+                createdAt: parseFirestoreField(fields.createdAt) || new Date().toISOString(),
+                updatedAt: parseFirestoreField(fields.updatedAt) || new Date().toISOString(),
+                expiresAt: parseFirestoreField(fields.expiresAt) || null,
+                totalTransactions: 0
+              };
+              inMemoryCrmUsers.unshift(foundCrm);
+              saveDeveloperStoresToFile();
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
 
   if (foundCrm) {
     const passMatches =
@@ -231,11 +571,48 @@ export function authenticateUserBackend(identifier: string, password: string): {
   }
 
   // 3. Staff Accounts (Admin, Kasir)
-  const foundStaff = inMemoryStaffAccounts.find(s =>
+  let foundStaff = inMemoryStaffAccounts.find(s =>
     (s.username && s.username.trim().toLowerCase() === cleanId) ||
     (s.email && s.email.trim().toLowerCase() === cleanId) ||
     (s.noHp && s.noHp.trim() === cleanId)
   );
+
+  // If not found in memory, query Supabase
+  if (!foundStaff) {
+    const sb = getSupabaseConfigBackend();
+    if (sb) {
+      try {
+        const queryUrl = `${sb.url}/rest/v1/staff_accounts?or=(username.ilike.${encodeURIComponent(cleanId)},email.ilike.${encodeURIComponent(cleanId)})&limit=1`;
+        const res = await fetch(queryUrl, {
+          headers: {
+            apikey: sb.key,
+            Authorization: `Bearer ${sb.key}`,
+          },
+          signal: AbortSignal.timeout(3000)
+        });
+        if (res.ok) {
+          const rows = await res.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const r = rows[0];
+            foundStaff = {
+              id: String(r.id),
+              username: r.username,
+              nama: r.nama,
+              password: r.password || 'password123',
+              role: r.role || 'kasir',
+              noHp: r.no_hp || '',
+              email: r.email || '',
+              status: r.status || 'aktif',
+              createdAt: r.created_at || new Date().toISOString(),
+              catatan: r.catatan || ''
+            };
+            inMemoryStaffAccounts.unshift(foundStaff);
+            saveDeveloperStoresToFile();
+          }
+        }
+      } catch (err: any) {}
+    }
+  }
 
   if (foundStaff) {
     const passMatches =
