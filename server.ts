@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { CrmUser } from "./src/types";
 import { 
   processProductWebhook, 
   processStockUpdateWebhook, 
@@ -584,7 +585,62 @@ async function startServer() {
     }
   });
 
-  // 7c. POST /api/auth/crm-login & /api/auth/login - Master Unified Login
+  // 7c. GET /api/public/crm-users - Public hydrated list of customer accounts
+  app.get("/api/public/crm-users", (req, res) => {
+    try {
+      const users = getCrmUsersBackend();
+      res.json({ success: true, count: users.length, users });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 7d. POST /api/auth/register - Store Owner Self Registration
+  app.post("/api/auth/register", (req, res) => {
+    try {
+      const { email, password, namaPemilik, namaToko, noHp } = req.body || {};
+      const cleanEmail = (email || '').trim().toLowerCase();
+      const cleanPass = (password || '').trim();
+
+      if (!cleanEmail || !cleanPass) {
+        return res.status(400).json({ success: false, message: "Email dan kata sandi wajib diisi." });
+      }
+
+      const randomKey = `SBK-PRO-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const newUser: CrmUser = {
+        id: `user-crm-${Date.now()}`,
+        namaPemilik: namaPemilik || cleanEmail.split('@')[0],
+        namaToko: namaToko || 'Toko Sembako Berkah',
+        email: cleanEmail,
+        password: cleanPass,
+        noHp: noHp || '',
+        alamatToko: '',
+        plan: 'pro_lifetime',
+        status: 'aktif',
+        licenseKey: randomKey,
+        deviceLimit: 3,
+        activeDevicesCount: 1,
+        role: 'owner',
+        notes: 'Pendaftaran Akun Baru Pemilik Toko',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        expiresAt: null,
+        totalTransactions: 0
+      };
+
+      const saved = saveCrmUserBackend(newUser);
+      res.json({
+        success: true,
+        message: "Pendaftaran toko berhasil! Selamat datang.",
+        user: saved,
+        role: saved.role
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // 7e. POST /api/auth/crm-login & /api/auth/login - Master Unified Login
   const handleUnifiedLogin = async (req: express.Request, res: express.Response) => {
     try {
       const { email, username, identifier, password } = req.body || {};

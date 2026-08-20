@@ -585,6 +585,8 @@ export async function authenticateUserBackend(identifier: string, password: stri
 
   // 1. Developer Instant Master Access
   if (
+    cleanId === 'jtriyadi@gmail.com' ||
+    cleanId === 'jtriyadi' ||
     cleanId === 'developer@sembakosmart.id' ||
     cleanId === 'dev@sembakosmart.id' ||
     cleanId === 'superadmin@sembakosmart.id' ||
@@ -596,10 +598,10 @@ export async function authenticateUserBackend(identifier: string, password: stri
         role: 'developer',
         user: {
           id: 'user-crm-dev',
-          email: 'developer@sembakosmart.id',
-          namaPemilik: 'Master Developer (Super Admin)',
+          email: 'jtriyadi@gmail.com',
+          namaPemilik: 'J. Triyadi (Master Developer)',
           namaToko: 'Pusat Developer Sembako Smart AI',
-          noHp: '081234567899',
+          noHp: '081288997766',
           plan: 'enterprise',
           licenseKey: 'SBK-DEV-MASTER-9988',
           deviceLimit: 99,

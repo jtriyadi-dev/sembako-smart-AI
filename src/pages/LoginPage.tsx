@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useStore } from '../context/StoreContext';
 import { useToast } from '../context/ToastContext';
-import { PageId } from '../types';
-import { Store, Sparkles, Mail, Lock, LogIn, ArrowRight, ShieldCheck, CheckCircle2, Globe, AlertCircle } from 'lucide-react';
+import { PageId, CrmUser } from '../types';
+import { INITIAL_CRM_USERS } from '../data/defaultRemoteConfig';
+import { Store, Sparkles, Mail, Lock, LogIn, ArrowRight, ShieldCheck, CheckCircle2, Globe, AlertCircle, Phone, UserCheck } from 'lucide-react';
 
 interface LoginPageProps {
   onNavigate: (page: PageId) => void;
@@ -17,8 +18,50 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [namaPemilik, setNamaPemilik] = useState('');
+  const [namaToko, setNamaToko] = useState('');
+  const [noHp, setNoHp] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [customerAccounts, setCustomerAccounts] = useState<CrmUser[]>(INITIAL_CRM_USERS);
+
+  // Load customer accounts dynamically from server & localStorage
+  useEffect(() => {
+    const loadCustomers = async () => {
+      let combined: CrmUser[] = [...INITIAL_CRM_USERS];
+      try {
+        const cached = localStorage.getItem('sembako_crm_users_v2');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            parsed.forEach((p: CrmUser) => {
+              if (!combined.some(c => c.email?.toLowerCase() === p.email?.toLowerCase())) {
+                combined.push(p);
+              }
+            });
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const res = await fetch('/api/public/crm-users', { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.users) && data.users.length > 0) {
+            data.users.forEach((u: CrmUser) => {
+              if (!combined.some(c => c.email?.toLowerCase() === u.email?.toLowerCase())) {
+                combined.push(u);
+              }
+            });
+          }
+        }
+      } catch (e) {}
+
+      setCustomerAccounts(combined.filter(u => u.role !== 'developer'));
+    };
+
+    loadCustomers();
+  }, []);
 
   const handlePostAuthNavigate = () => {
     const devAuth = localStorage.getItem('sembako_developer_auth_session');
@@ -55,13 +98,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   };
 
   const handleDeveloperQuickLogin = async () => {
-    setEmail('developer@sembakosmart.id');
+    setEmail('jtriyadi@gmail.com');
     setPassword('password123');
     setSubmitting(true);
     setAuthError(null);
     try {
-      await login('developer@sembakosmart.id', 'password123');
-      success('Selamat Datang Developer', 'Masuk sebagai Super Admin Developer Sembako Smart AI.');
+      await login('jtriyadi@gmail.com', 'password123');
+      success('Selamat Datang Developer J. Triyadi', 'Masuk sebagai Super Admin Developer Sembako Smart AI.');
       handlePostAuthNavigate();
     } catch (err: any) {
       setAuthError(err.message || 'Gagal login developer.');
@@ -71,14 +114,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleOwnerQuickLogin = async (ownerEmail: string, ownerName: string) => {
+  const handleOwnerQuickLogin = async (ownerEmail: string, ownerName: string, pass: string = 'password123') => {
     setEmail(ownerEmail);
-    setPassword('password123');
+    setPassword(pass);
     setSubmitting(true);
     setAuthError(null);
     try {
-      await login(ownerEmail, 'password123');
-      success('Selamat Datang Pemilik Toko', `Masuk sebagai ${ownerName}.`);
+      await login(ownerEmail, pass);
+      success('Selamat Datang', `Masuk sebagai ${ownerName}.`);
       handlePostAuthNavigate();
     } catch (err: any) {
       setAuthError(err.message || 'Gagal login pemilik toko.');
@@ -92,14 +135,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     setAuthError(null);
     if (!email || !password) {
-      error('Input Kurang', 'Masukkan email dan kata sandi Anda.');
+      error('Input Kurang', 'Masukkan email/no HP dan kata sandi Anda.');
       return;
     }
 
     setSubmitting(true);
     try {
       if (isRegister) {
-        await signup(email, password);
+        await signup(email, password, { namaPemilik, namaToko, noHp });
         success('Pendaftaran Berhasil', 'Akun Toko Sembako Smart AI telah dibuat.');
       } else {
         await login(email, password);
@@ -114,7 +157,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
       } else if (err.code === 'auth/weak-password') {
         msg = 'Kata sandi terlalu pendek. Gunakan minimal 6 karakter.';
       } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = 'Email atau kata sandi tidak cocok. Bila belum buat akun, silakan klik Daftar.';
+        msg = 'Email atau kata sandi tidak cocok. Silakan periksa kembali data Anda.';
       }
       setAuthError(msg);
       error('Gagal Autentikasi', msg);
@@ -134,7 +177,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
       console.error('Google Login Error:', err);
       let msg = err?.message || 'Gagal masuk dengan akun Google.';
       if (err?.code === 'auth/unauthorized-domain') {
-        msg = 'Domain ini (sembako-smart-ai.vercel.app) belum diizinkan di Firebase Console. Buka Firebase Console > Authentication > Settings > Authorized Domains > Tambahkan domain sembako-smart-ai.vercel.app. Atau gunakan Masuk Mode Demo di bawah.';
+        msg = 'Domain ini belum diizinkan di Firebase Console. Anda dapat masuk langsung menggunakan Email / Password toko Anda.';
       } else if (err?.code === 'auth/popup-blocked') {
         msg = 'Pop-up Google diblokir oleh browser. Harap izinkan pop-up pada browser Anda.';
       } else if (err?.code === 'auth/popup-closed-by-user') {
@@ -196,7 +239,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               {isRegister ? 'Buat Akun Toko Baru' : 'Masuk ke Toko Anda'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Kelola stok, kasir, dan analisis AI dalam satu platform terpadu.
+              {isRegister
+                ? 'Daftar akun pemilik toko untuk kelola kasir dan stok sembako.'
+                : 'Masuk dengan Email, No. WhatsApp, atau Akun Pegawai.'}
             </p>
           </div>
 
@@ -206,20 +251,56 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <span>{authError}</span>
-                {authError.includes('sembako-smart-ai.vercel.app') && (
-                  <p className="text-[11px] text-amber-500 font-bold underline cursor-pointer pt-1" onClick={handleDemoAccess}>
-                    👉 Klik di sini untuk masuk Mode Demo 6 Jam secara instant.
-                  </p>
-                )}
               </div>
             </div>
           )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
+            {isRegister && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Nama Pemilik Toko
+                  </label>
+                  <input
+                    type="text"
+                    value={namaPemilik}
+                    onChange={(e) => setNamaPemilik(e.target.value)}
+                    placeholder="Contoh: Haji Budi Santoso"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Nama Toko Sembako
+                  </label>
+                  <input
+                    type="text"
+                    value={namaToko}
+                    onChange={(e) => setNamaToko(e.target.value)}
+                    placeholder="Contoh: Toko Berkah Sembako"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    No. WhatsApp (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={noHp}
+                    onChange={(e) => setNoHp(e.target.value)}
+                    placeholder="Contoh: 081234567890"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Email atau Username Pegawai (Admin / Kasir / Owner)
+                Email / No. WhatsApp / Username
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -227,7 +308,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                   type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Contoh: owner@toko.com, admin1, atau kasir1"
+                  placeholder="Contoh: jtriyadi@gmail.com, 0812..., atau kasir1"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -245,7 +326,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="•••••••• (default: password123)"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
                 />
               </div>
@@ -254,7 +335,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-emerald-800 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold text-sm shadow-lg shadow-emerald-900/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-emerald-800 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold text-sm shadow-lg shadow-emerald-900/25 flex items-center justify-center gap-2 transition-all cursor-pointer mt-2"
             >
               {submitting ? (
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -300,31 +381,39 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               <button
                 type="button"
                 onClick={handleDemoAccess}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-500/10 hover:from-amber-500/30 hover:to-orange-500/30 border border-amber-500/40 text-amber-800 dark:text-amber-300 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer"
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-500/10 hover:from-amber-500/30 hover:to-orange-500/30 border border-amber-500/40 text-amber-800 dark:text-amber-300 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4 text-amber-500 shrink-0" />
                 <span>Masuk Akun Coba Demo (Berlaku 6 Jam)</span>
                 <ArrowRight className="w-3.5 h-3.5 shrink-0" />
               </button>
-              <p className="text-[10px] text-slate-400 text-center font-mono">
-                ⏱️ Akses demo aktif selama 6 jam. Setelah 6 jam, semua data di-reset kembali kosong/awal.
-              </p>
             </div>
 
-            {/* Quick Owner Login */}
+            {/* Dynamic Customer / Store Owner Quick Login */}
             <div className="pt-2">
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1.5 flex items-center justify-between">
-                <span>👑 Masuk Akun Pemilik Toko (Owner):</span>
-                <span className="text-[10px] text-amber-500 font-mono">Lisensi Lifetime</span>
+                <span>👑 Akun Pemilik Toko Terdaftar:</span>
+                <span className="text-[10px] text-amber-500 font-mono">1-Klik Masuk</span>
               </div>
-              <button
-                type="button"
-                onClick={() => handleOwnerQuickLogin('jtriyadi@gmail.com', 'J. Triyadi (Owner)')}
-                className="w-full py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
-              >
-                <Store className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span>Masuk Cepat: Pemilik Toko (jtriyadi@gmail.com)</span>
-              </button>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                {customerAccounts.slice(0, 4).map((c) => (
+                  <button
+                    key={c.id || c.email}
+                    type="button"
+                    onClick={() => handleOwnerQuickLogin(c.email || c.noHp || c.id, c.namaPemilik || 'Pemilik Toko', c.password || 'password123')}
+                    className="w-full py-1.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs font-medium flex items-center justify-between transition-all cursor-pointer shadow-2xs text-left"
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Store className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span className="font-semibold truncate">{c.namaPemilik}</span>
+                      <span className="text-[10px] text-slate-400 truncate">({c.email || c.noHp})</span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 font-mono shrink-0">
+                      Masuk
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Quick Staff Login (Kasir & Admin) */}
@@ -337,7 +426,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                 <button
                   type="button"
                   onClick={() => handleStaffQuickLogin('kasir1', 'Kasir POS')}
-                  className="py-2 px-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  className="py-2 px-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
                 >
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   <span>Kasir (kasir1)</span>
@@ -345,7 +434,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                 <button
                   type="button"
                   onClick={() => handleStaffQuickLogin('admin1', 'Admin Toko')}
-                  className="py-2 px-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  className="py-2 px-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
                 >
                   <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                   <span>Admin (admin1)</span>
@@ -358,10 +447,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               <button
                 type="button"
                 onClick={handleDeveloperQuickLogin}
-                className="w-full py-2 px-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-600 dark:text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                className="w-full py-2 px-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-600 dark:text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
               >
                 <ShieldCheck className="w-4 h-4 text-purple-500 shrink-0" />
-                <span>Masuk Cepat: Developer (Super Admin)</span>
+                <span>Masuk Developer: J. Triyadi (jtriyadi@gmail.com)</span>
               </button>
             </div>
           </div>
@@ -369,8 +458,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
           {/* Toggle Register / Login */}
           <div className="mt-6 flex flex-col items-center gap-3">
             <button
-              onClick={() => setIsRegister(!isRegister)}
-              className="text-xs text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 font-medium"
+              onClick={() => {
+                setIsRegister(!isRegister);
+                setAuthError(null);
+              }}
+              className="text-xs text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 font-medium cursor-pointer"
             >
               {isRegister
                 ? 'Sudah punya akun? Masuk di sini'
@@ -380,7 +472,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
           <div className="mt-6 flex items-center justify-center gap-1.5 text-[10px] text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Terproteksi Firebase Auth & Firestore Rules</span>
+            <span>Terproteksi Sistem Autentikasi Cloud & Server Sinkron</span>
           </div>
 
         </div>
@@ -388,3 +480,4 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     </div>
   );
 };
+

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "staff-jtriyadi-01",
+    "username": "jtriyadi",
+    "nama": "J. Triyadi (Owner/Admin)",
+    "password": "password123",
+    "role": "admin",
+    "noHp": "081288997766",
+    "email": "jtriyadi@gmail.com",
+    "status": "aktif",
+    "createdAt": "2026-08-01T00:00:00.000Z",
+    "catatan": "Akun Pengelola Toko Sembako Smart AI (Akses Semua Perangkat)."
+  },
+  {
+    "id": "staff-admin-01",
+    "username": "admin1",
+    "nama": "Admin Toko",
+    "password": "password123",
+    "role": "admin",
+    "noHp": "081234567891",
+    "email": "admin1@sembakosmart.id",
+    "status": "aktif",
+    "createdAt": "2026-08-01T00:00:00.000Z",
+    "catatan": "Akun Admin pengelola produk, stok, dan laporan toko."
+  },
+  {
+    "id": "staff-kasir-01",
+    "username": "kasir1",
+    "nama": "Kasir Utama",
+    "password": "password123",
+    "role": "kasir",
+    "noHp": "081234567892",
+    "email": "kasir1@sembakosmart.id",
+    "status": "aktif",
+    "createdAt": "2026-08-01T00:00:00.000Z",
+    "catatan": "Akun Kasir untuk melayani transaksi kasir POS."
+  }
+]

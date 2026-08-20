@@ -9,7 +9,7 @@ const LOCAL_STORAGE_DEV_AUTH = 'sembako_developer_auth_session';
 
 // Master fallback passcode (can be changed dynamically by the developer)
 export const MASTER_DEV_PIN = '998877';
-export const MASTER_DEV_EMAIL = 'developer@sembakosmart.id';
+export const MASTER_DEV_EMAIL = 'jtriyadi@gmail.com';
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
 
 // Safe helper to avoid JSON parse errors on HTML 404/500 responses
