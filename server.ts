@@ -468,6 +468,24 @@ async function startServer() {
   // DEVELOPER CONTROL PANEL & LIVE CMS ROUTES
   // ==========================================
 
+  // Public Endpoint: Auto-discovery for Multi-Device Supabase Client Connection
+  app.get("/api/public/supabase-config", (req, res) => {
+    try {
+      const keys = getApiKeysBackend();
+      const sbUrl = (keys.supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+      const sbAnonKey = (keys.supabaseAnonKey || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+      res.json({
+        status: "ok",
+        configured: Boolean(sbUrl && sbAnonKey),
+        supabaseUrl: sbUrl,
+        supabaseAnonKey: sbAnonKey,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to get public Supabase config" });
+    }
+  });
+
   // 1. GET /api/developer/config - Public Live Website & App Configuration
   app.get("/api/developer/config", (req, res) => {
     try {

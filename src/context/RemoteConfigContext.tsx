@@ -10,6 +10,7 @@ import {
   setDeveloperSession,
   clearDeveloperSession
 } from '../services/devCrmService';
+import { initPublicSupabaseConfig } from '../services/supabaseClient';
 
 interface RemoteConfigContextType {
   config: RemoteAppConfig;
@@ -43,6 +44,19 @@ export const RemoteConfigProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (isDeveloperLoggedIn()) {
         const keys = await fetchDeveloperApiKeys();
         setApiKeys(keys);
+      } else {
+        // Also run public Supabase auto-discovery for client / secondary devices
+        await initPublicSupabaseConfig();
+        try {
+          const rawDevKeys = localStorage.getItem('sembako_developer_api_keys');
+          const rawSemKeys = localStorage.getItem('sem_api_keys');
+          let combined = {};
+          if (rawDevKeys) combined = { ...combined, ...JSON.parse(rawDevKeys) };
+          if (rawSemKeys) combined = { ...combined, ...JSON.parse(rawSemKeys) };
+          if (Object.keys(combined).length > 0) {
+            setApiKeys(prev => ({ ...prev, ...combined }));
+          }
+        } catch (_) {}
       }
       setLastSyncedAt(new Date());
     } catch (err) {

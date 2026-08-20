@@ -403,10 +403,32 @@ export async function fetchDeveloperApiKeys(devSecret: string = ''): Promise<Dev
     if (ok && data && data.keys) {
       try {
         localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(data.keys));
+        localStorage.setItem('sem_api_keys', JSON.stringify(data.keys));
       } catch (e) {}
       return data.keys;
     }
   } catch (err) {}
+
+  // Fallback: Check public supabase config endpoint
+  try {
+    const pubRes = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(2500) });
+    if (pubRes.ok) {
+      const pubData = await pubRes.json();
+      if (pubData && pubData.configured) {
+        const partial: Partial<DeveloperApiKeys> = {
+          supabaseUrl: pubData.supabaseUrl,
+          supabaseAnonKey: pubData.supabaseAnonKey,
+        };
+        try {
+          const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS);
+          const merged = cached ? { ...JSON.parse(cached), ...partial } : { ...DEFAULT_API_KEYS, ...partial };
+          localStorage.setItem(LOCAL_STORAGE_API_KEYS, JSON.stringify(merged));
+          localStorage.setItem('sem_api_keys', JSON.stringify(merged));
+          return merged;
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
 
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS);

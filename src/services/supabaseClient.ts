@@ -83,6 +83,119 @@ export function logSupabase(type: 'connected' | 'query' | 'error' | 'realtime' |
 }
 
 /**
+ * Auto-discovery for Multi-Device connection:
+ * 1. Checks URL Query Parameters (?sb_url=...&sb_key=...&store_id=...)
+ * 2. If local keys are empty, fetches public keys from server (/api/public/supabase-config)
+ */
+export async function initPublicSupabaseConfig(): Promise<SupabaseClient | null> {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    // 1. Check URL parameters for instant 1-Click QR/Pairing Link
+    const urlParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    
+    const paramUrl = urlParams.get('sb_url') || hashParams.get('sb_url');
+    const paramKey = urlParams.get('sb_key') || hashParams.get('sb_key');
+    const paramStore = urlParams.get('store_id') || urlParams.get('store') || hashParams.get('store_id');
+
+    if (paramUrl && paramKey) {
+      console.log('[Supabase Auto-Pairing] Parameter koneksi ditemukan di URL! Menyimpan kredensial...');
+      const cleanUrl = sanitizeSupabaseUrl(paramUrl);
+      const cleanKey = sanitizeSupabaseKey(paramKey);
+      
+      const toSave = {
+        supabaseUrl: cleanUrl,
+        supabaseAnonKey: cleanKey,
+        updatedAt: new Date().toISOString()
+      };
+      
+      localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
+      localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+      
+      if (paramStore) {
+        setCurrentStoreId(paramStore);
+      }
+
+      // Clean URL query without page reload
+      try {
+        const cleanHref = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanHref);
+      } catch (_) {}
+
+      return getSupabaseClient(cleanUrl, cleanKey);
+    }
+  } catch (_) {}
+
+  // 2. Check if we already have local keys
+  const existingClient = getSupabaseClient();
+  if (existingClient) {
+    return existingClient;
+  }
+
+  // 3. Auto-fetch from Server Backend public endpoint
+  try {
+    const res = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(3500) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.configured && data.supabaseUrl && data.supabaseAnonKey) {
+        console.log('[Supabase Auto-Discovery] Berhasil mendapatkan konfigurasi Supabase dari server pusat!');
+        const toSave = {
+          supabaseUrl: sanitizeSupabaseUrl(data.supabaseUrl),
+          supabaseAnonKey: sanitizeSupabaseKey(data.supabaseAnonKey),
+          updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
+        localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+        return getSupabaseClient(toSave.supabaseUrl, toSave.supabaseAnonKey);
+      }
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+// Auto-run discovery in browser environment
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    initPublicSupabaseConfig().catch(() => {});
+  }, 100);
+}
+
+/**
+ * Generate 1-Click Pairing URL for other devices
+ */
+export function generateDevicePairingUrl(customStoreId?: string): string {
+  if (typeof window === 'undefined') return '';
+  
+  let localKeys: any = {};
+  try {
+    const rawDevKeys = localStorage.getItem('sembako_developer_api_keys');
+    const rawSemKeys = localStorage.getItem('sem_api_keys');
+    if (rawDevKeys) localKeys = { ...localKeys, ...JSON.parse(rawDevKeys) };
+    if (rawSemKeys) localKeys = { ...localKeys, ...JSON.parse(rawSemKeys) };
+  } catch (_) {}
+
+  const env = (import.meta as any).env || {};
+  const url = (localKeys.supabaseUrl || env.VITE_SUPABASE_URL || env.SUPABASE_URL || '').trim();
+  const key = (localKeys.supabaseAnonKey || localKeys.supabaseServiceRoleKey || env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+  const activeStore = customStoreId || getCurrentStoreId();
+
+  if (!url || !key) return '';
+
+  const origin = window.location.origin + window.location.pathname;
+  return `${origin}?sb_url=${encodeURIComponent(url)}&sb_key=${encodeURIComponent(key)}&store_id=${encodeURIComponent(activeStore)}`;
+}
+
+/**
+ * Generate QR Code Image URL for fast smartphone/tablet scanning
+ */
+export function generateDevicePairingQrUrl(pairingUrl: string): string {
+  if (!pairingUrl) return '';
+  return `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(pairingUrl)}`;
+}
+
+/**
  * Get active Supabase client with fallback hierarchy:
  * 1. Explicit arguments
  * 2. LocalStorage / Control Panel API keys (sembako_developer_api_keys, sem_api_keys, etc.)
