@@ -16,6 +16,9 @@ import {
   getSupabaseClient, 
   getCurrentStoreId, 
   subscribeRealtimeTable, 
+  queryTableWithFallback,
+  upsertWithColumnFallback,
+  isMissingColumnError,
   logSupabase 
 } from './supabaseClient';
 
@@ -85,12 +88,7 @@ export async function fetchStaffAccountsDirect(overrideStoreId?: string): Promis
 
   if (supabase) {
     try {
-      let queryBuilder = supabase.from('staff_accounts').select('*');
-      if (storeId && storeId !== 'all') {
-        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
-      }
-
-      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+      const { data, error } = await queryTableWithFallback(supabase, 'staff_accounts', storeId, 'created_at', false);
 
       if (!error && Array.isArray(data) && data.length > 0) {
         const staffList: StaffAccount[] = data.map((r: any) => ({
@@ -210,8 +208,10 @@ export async function seedInitialStaffAccounts(): Promise<StaffAccount[]> {
         created_at: s.createdAt,
       }));
 
-      await supabase.from('staff_accounts').upsert(rows, { onConflict: 'id' });
-      logSupabase('sync', `Berhasil seed ${rows.length} akun staf ke Supabase`);
+      const { error } = await upsertWithColumnFallback(supabase, 'staff_accounts', rows, 'id');
+      if (!error) {
+        logSupabase('sync', `Berhasil seed ${rows.length} akun staf ke Supabase`);
+      }
     } catch (e) {}
   }
 
@@ -253,7 +253,7 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase.from('staff_accounts').upsert([{
+      await upsertWithColumnFallback(supabase, 'staff_accounts', [{
         id: newAccount.id,
         store_id: storeId,
         username: newAccount.username,
@@ -265,7 +265,7 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
         status: newAccount.status,
         catatan: newAccount.catatan || null,
         created_at: newAccount.createdAt,
-      }], { onConflict: 'id' });
+      }], 'id');
       logSupabase('sync', `Akun staf "${newAccount.username}" tersimpan di Supabase`);
     } catch (e) {
       logSupabase('error', 'Exception addStaffAccount Supabase:', e);
@@ -335,8 +335,17 @@ export async function updateStaffAccount(id: string, updates: Partial<StaffAccou
       if (updates.catatan !== undefined) sbUpdate.catatan = updates.catatan;
       if (storeId) sbUpdate.store_id = storeId;
 
-      await supabase.from('staff_accounts').update(sbUpdate).eq('id', id);
-      logSupabase('sync', `Akun staf ${id} diperbarui di Supabase`);
+      let { error } = await supabase.from('staff_accounts').update(sbUpdate).eq('id', id);
+      if (error && isMissingColumnError(error)) {
+        delete sbUpdate.store_id;
+        const retry = await supabase.from('staff_accounts').update(sbUpdate).eq('id', id);
+        error = retry.error;
+      }
+      if (error) {
+        logSupabase('error', `Gagal update akun staf ${id} di Supabase: ${error.message}`, error);
+      } else {
+        logSupabase('sync', `Akun staf ${id} diperbarui di Supabase`);
+      }
     } catch (e) {
       logSupabase('error', 'Exception updateStaffAccount Supabase:', e);
     }

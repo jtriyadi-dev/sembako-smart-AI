@@ -15,6 +15,9 @@ import {
   getSupabaseClient, 
   getCurrentStoreId, 
   subscribeRealtimeTable, 
+  queryTableWithFallback,
+  upsertWithColumnFallback,
+  isMissingColumnError,
   logSupabase 
 } from './supabaseClient';
 
@@ -29,13 +32,8 @@ export async function fetchStockMovementsDirect(overrideStoreId?: string): Promi
   if (supabase) {
     try {
       logSupabase('query', `Mengambil mutasi stok untuk Store ID: "${storeId}"...`);
-      let queryBuilder = supabase.from('stock_movements').select('*');
-
-      if (storeId && storeId !== 'all') {
-        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
-      }
-
-      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+      
+      const { data, error } = await queryTableWithFallback(supabase, 'stock_movements', storeId, 'created_at', false);
 
       if (error) {
         logSupabase('error', `Gagal fetch mutasi stok dari Supabase: ${error.message}`, error);
@@ -89,12 +87,7 @@ export async function fetchStockOpnamesDirect(overrideStoreId?: string): Promise
 
   if (supabase) {
     try {
-      let queryBuilder = supabase.from('stock_opnames').select('*');
-      if (storeId && storeId !== 'all') {
-        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
-      }
-
-      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+      const { data, error } = await queryTableWithFallback(supabase, 'stock_opnames', storeId, 'created_at', false);
 
       if (!error && Array.isArray(data)) {
         const opnames: StockOpname[] = data.map((r: any) => ({
@@ -269,7 +262,7 @@ export async function recordStockMovement(params: {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase.from('stock_movements').insert([{
+      await upsertWithColumnFallback(supabase, 'stock_movements', [{
         id,
         store_id: storeId,
         produk_id: product.id,
@@ -285,7 +278,7 @@ export async function recordStockMovement(params: {
         batch_no: batchNo?.trim() || '',
         operator: operator || 'Admin Toko',
         created_at: now,
-      }]);
+      }], 'id');
 
       const prodUpdate: any = {
         stok: stokAkhir,
@@ -443,7 +436,7 @@ export async function saveStockOpname(params: {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase.from('stock_opnames').insert([{
+      await upsertWithColumnFallback(supabase, 'stock_opnames', [{
         id,
         store_id: storeId,
         tanggal: now.split('T')[0],
@@ -457,7 +450,7 @@ export async function saveStockOpname(params: {
         status: 'selesai',
         operator: operator || 'Admin Toko',
         created_at: now,
-      }]);
+      }], 'id');
 
       logSupabase('sync', `Stock Opname untuk "${targetProduct.nama}" tersimpan di Supabase`);
     } catch (e) {

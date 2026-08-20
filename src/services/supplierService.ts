@@ -18,6 +18,9 @@ import {
   getSupabaseClient, 
   getCurrentStoreId, 
   subscribeRealtimeTable, 
+  queryTableWithFallback,
+  upsertWithColumnFallback,
+  isMissingColumnError,
   logSupabase 
 } from './supabaseClient';
 
@@ -31,13 +34,8 @@ export async function fetchSuppliersDirect(overrideStoreId?: string): Promise<Su
   if (supabase) {
     try {
       logSupabase('query', `Mengambil data supplier untuk Store ID: "${storeId}"...`);
-      let queryBuilder = supabase.from('suppliers').select('*');
-
-      if (storeId && storeId !== 'all') {
-        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
-      }
-
-      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+      
+      const { data, error } = await queryTableWithFallback(supabase, 'suppliers', storeId, 'created_at', false);
 
       if (error) {
         logSupabase('error', `Gagal fetch supplier dari Supabase: ${error.message}`, error);
@@ -199,7 +197,7 @@ export async function addSupplier(supplier: Omit<SupplierItem, 'id'>): Promise<s
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase.from('suppliers').upsert([{
+      await upsertWithColumnFallback(supabase, 'suppliers', [{
         id,
         store_id: storeId,
         kode_supplier: cleanData.kodeSupplier,
@@ -213,7 +211,7 @@ export async function addSupplier(supplier: Omit<SupplierItem, 'id'>): Promise<s
         status: cleanData.status,
         created_at: now,
         updated_at: now,
-      }], { onConflict: 'id' });
+      }], 'id');
 
       logSupabase('sync', `Supplier "${cleanData.namaSupplier}" tersimpan di Supabase`);
     } catch (e) {
@@ -258,8 +256,17 @@ export async function updateSupplier(id: string, supplier: Partial<SupplierItem>
       if (supplier.status !== undefined) updatePayload.status = supplier.status;
       if (storeId) updatePayload.store_id = storeId;
 
-      await supabase.from('suppliers').update(updatePayload).eq('id', id);
-      logSupabase('sync', `Supplier ${id} berhasil diperbarui di Supabase`);
+      let { error } = await supabase.from('suppliers').update(updatePayload).eq('id', id);
+      if (error && isMissingColumnError(error)) {
+        delete updatePayload.store_id;
+        const retry = await supabase.from('suppliers').update(updatePayload).eq('id', id);
+        error = retry.error;
+      }
+      if (error) {
+        logSupabase('error', `Gagal update supplier ${id} di Supabase: ${error.message}`, error);
+      } else {
+        logSupabase('sync', `Supplier ${id} berhasil diperbarui di Supabase`);
+      }
     } catch (e) {
       logSupabase('error', 'Exception updateSupplier Supabase:', e);
     }

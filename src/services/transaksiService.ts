@@ -16,6 +16,9 @@ import {
   getSupabaseClient, 
   getCurrentStoreId, 
   subscribeRealtimeTable, 
+  queryTableWithFallback,
+  upsertWithColumnFallback,
+  isMissingColumnError,
   logSupabase 
 } from './supabaseClient';
 
@@ -29,13 +32,8 @@ export async function fetchTransactionsDirect(overrideStoreId?: string): Promise
   if (supabase) {
     try {
       logSupabase('query', `Mengambil data transaksi untuk Store ID: "${storeId}"...`);
-      let queryBuilder = supabase.from('transactions').select('*');
-
-      if (storeId && storeId !== 'all') {
-        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
-      }
-
-      const { data, error } = await queryBuilder.order('tanggal', { ascending: false });
+      
+      const { data, error } = await queryTableWithFallback(supabase, 'transactions', storeId, 'tanggal', false);
 
       if (error) {
         logSupabase('error', `Gagal fetch transaksi Supabase: ${error.message}`, error);
@@ -282,7 +280,8 @@ export async function returTransaction(
             }).eq('id', item.produkId);
 
             // Log movement to Supabase
-            await supabase.from('stock_movements').insert([{
+            await upsertWithColumnFallback(supabase, 'stock_movements', [{
+              id: `mov-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
               store_id: storeId,
               produk_id: item.produkId,
               nama_produk: item.namaProduk,
@@ -294,7 +293,7 @@ export async function returTransaction(
               keterangan: `Retur Seluruh Transaksi #${transaction.kodeTransaksi} (${alasan})`,
               operator: operatorName,
               created_at: now
-            }]);
+            }], 'id');
           }
         } catch (e) {}
       }
@@ -431,7 +430,8 @@ export async function returItemsTransaction(
               updated_at: now
             }).eq('id', targetItem.produkId);
 
-            await supabase.from('stock_movements').insert([{
+            await upsertWithColumnFallback(supabase, 'stock_movements', [{
+              id: `mov-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
               store_id: storeId,
               produk_id: targetItem.produkId,
               nama_produk: targetItem.namaProduk,
@@ -443,7 +443,7 @@ export async function returItemsTransaction(
               keterangan: `Retur Item ${targetItem.namaProduk} (${req.jumlahRetur} ${targetItem.satuan}) dari TRX #${transaction.kodeTransaksi}`,
               operator: operatorName,
               created_at: now
-            }]);
+            }], 'id');
           }
         } catch (e) {}
       }
@@ -536,7 +536,7 @@ export async function createTransaction(txData: Omit<TransaksiItem, 'id'>): Prom
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { error: txErr } = await supabase.from('transactions').upsert([{
+      const { error: txErr } = await upsertWithColumnFallback(supabase, 'transactions', [{
         id: finalData.id,
         store_id: storeId,
         kode_transaksi: finalData.kodeTransaksi,
@@ -557,7 +557,7 @@ export async function createTransaction(txData: Omit<TransaksiItem, 'id'>): Prom
         catatan: finalData.catatan || null,
         items: finalData.items,
         created_at: now
-      }], { onConflict: 'id' });
+      }], 'id');
 
       if (txErr) {
         logSupabase('error', `Gagal simpan transaksi ke Supabase: ${txErr.message}`, txErr);
@@ -588,7 +588,8 @@ export async function createTransaction(txData: Omit<TransaksiItem, 'id'>): Prom
             }).eq('id', item.produkId);
 
             // Log movement to Supabase
-            await supabase.from('stock_movements').insert([{
+            await upsertWithColumnFallback(supabase, 'stock_movements', [{
+              id: `mov-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
               store_id: storeId,
               produk_id: item.produkId,
               nama_produk: item.namaProduk,
@@ -600,7 +601,7 @@ export async function createTransaction(txData: Omit<TransaksiItem, 'id'>): Prom
               keterangan: `Penjualan Kasir POS #${finalData.kodeTransaksi}`,
               operator: finalData.kasirName || 'Kasir Toko',
               created_at: now
-            }]);
+            }], 'id');
           }
         } catch (e) {
           logSupabase('error', `Gagal kurangi stok produk ${item.produkId} di Supabase:`, e);

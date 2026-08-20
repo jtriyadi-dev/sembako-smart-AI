@@ -16,7 +16,10 @@ import {
   Zap, 
   Send, 
   ArrowDownUp, 
-  Store
+  Store,
+  Users,
+  Search,
+  Filter
 } from 'lucide-react';
 import { 
   getSupabaseClient, 
@@ -24,14 +27,17 @@ import {
   setCurrentStoreId, 
   SUPABASE_SCHEMA_SQL,
   subscribeRealtimeTable,
+  countTableWithFallback,
   logSupabase
 } from '../services/supabaseClient';
+import { fetchCrmUsers } from '../services/devCrmService';
 import { fetchProductsDirect } from '../services/productService';
 import { fetchTransactionsDirect } from '../services/transaksiService';
 import { fetchStockMovementsDirect } from '../services/stockService';
 import { fetchSuppliersDirect } from '../services/supplierService';
 import { fetchStaffAccountsDirect } from '../services/staffService';
 import { useToast } from '../context/ToastContext';
+import { CrmUser } from '../types';
 
 export const SupabaseSyncManager: React.FC = () => {
   const { success, warning, error: toastError, info } = useToast();
@@ -41,6 +47,7 @@ export const SupabaseSyncManager: React.FC = () => {
   const [isChecking, setIsChecking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [crmUsers, setCrmUsers] = useState<CrmUser[]>([]);
   const [tableStats, setTableStats] = useState<{
     products: number;
     transactions: number;
@@ -60,6 +67,15 @@ export const SupabaseSyncManager: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string>(new Date().toLocaleTimeString('id-ID'));
   const [realtimeMessages, setRealtimeMessages] = useState<{ time: string; text: string }[]>([]);
 
+  // Load CRM Users for Developer Tenant Selector
+  useEffect(() => {
+    fetchCrmUsers().then((users) => {
+      if (Array.isArray(users)) {
+        setCrmUsers(users);
+      }
+    }).catch(() => {});
+  }, []);
+
   // Check Supabase connection and table counts
   const checkSupabaseStatus = async () => {
     setIsChecking(true);
@@ -73,22 +89,31 @@ export const SupabaseSyncManager: React.FC = () => {
     try {
       const activeStore = getCurrentStoreId();
       
-      const [pRes, tRes, smRes, sRes, saRes, uRes] = await Promise.allSettled([
-        supabase.from('products').select('id', { count: 'exact', head: true }).or(`store_id.eq.${activeStore},store_id.eq.default_store,store_id.is.null`),
-        supabase.from('transactions').select('id', { count: 'exact', head: true }).or(`store_id.eq.${activeStore},store_id.eq.default_store,store_id.is.null`),
-        supabase.from('stock_movements').select('id', { count: 'exact', head: true }).or(`store_id.eq.${activeStore},store_id.eq.default_store,store_id.is.null`),
-        supabase.from('suppliers').select('id', { count: 'exact', head: true }).or(`store_id.eq.${activeStore},store_id.eq.default_store,store_id.is.null`),
-        supabase.from('staff_accounts').select('id', { count: 'exact', head: true }).or(`store_id.eq.${activeStore},store_id.eq.default_store,store_id.is.null`),
-        supabase.from('crm_users').select('id', { count: 'exact', head: true }),
+      const countCrmUsers = async () => {
+        try {
+          const res = await supabase.from('crm_users').select('id', { count: 'exact', head: true });
+          return res.count ?? 0;
+        } catch {
+          return 0;
+        }
+      };
+
+      const [pCount, tCount, smCount, sCount, saCount, uCount] = await Promise.all([
+        countTableWithFallback(supabase, 'products', activeStore),
+        countTableWithFallback(supabase, 'transactions', activeStore),
+        countTableWithFallback(supabase, 'stock_movements', activeStore),
+        countTableWithFallback(supabase, 'suppliers', activeStore),
+        countTableWithFallback(supabase, 'staff_accounts', activeStore),
+        countCrmUsers(),
       ]);
 
       setTableStats({
-        products: pRes.status === 'fulfilled' && pRes.value.count !== null ? pRes.value.count : 0,
-        transactions: tRes.status === 'fulfilled' && tRes.value.count !== null ? tRes.value.count : 0,
-        stockMovements: smRes.status === 'fulfilled' && smRes.value.count !== null ? smRes.value.count : 0,
-        suppliers: sRes.status === 'fulfilled' && sRes.value.count !== null ? sRes.value.count : 0,
-        staffAccounts: saRes.status === 'fulfilled' && saRes.value.count !== null ? saRes.value.count : 0,
-        crmUsers: uRes.status === 'fulfilled' && uRes.value.count !== null ? uRes.value.count : 0,
+        products: pCount,
+        transactions: tCount,
+        stockMovements: smCount,
+        suppliers: sCount,
+        staffAccounts: saCount,
+        crmUsers: uCount,
       });
 
       setConnectionStatus('connected');
@@ -108,7 +133,7 @@ export const SupabaseSyncManager: React.FC = () => {
       setRealtimeMessages((prev) => [
         {
           time: new Date().toLocaleTimeString('id-ID'),
-          text: `Event [${payload.eventType || 'UPDATE'}] diterima dari perangkat lain untuk tabel produk!`,
+          text: `Event [${payload.eventType || 'UPDATE'}] diterima dari cloud untuk tabel produk!`,
         },
         ...prev.slice(0, 9),
       ]);
@@ -120,17 +145,22 @@ export const SupabaseSyncManager: React.FC = () => {
     };
   }, [storeId]);
 
+  const handleSelectStoreId = (selectedId: string) => {
+    setCurrentStoreId(selectedId);
+    setStoreIdState(selectedId);
+    setNewStoreIdInput(selectedId);
+    setIsEditingStoreId(false);
+    success('Store Tenant Dipilih', `Target store ID aktif diubah menjadi: "${selectedId}".`);
+    checkSupabaseStatus();
+  };
+
   const handleSaveStoreId = () => {
     const trimmed = newStoreIdInput.trim();
     if (!trimmed) {
       warning('Store ID Kosong', 'Harap masukkan ID Toko.');
       return;
     }
-    setCurrentStoreId(trimmed);
-    setStoreIdState(trimmed);
-    setIsEditingStoreId(false);
-    success('Store ID Diperbarui', `ID Toko aktif diubah menjadi: "${trimmed}". Data akan disaring berdasarkan ID ini.`);
-    checkSupabaseStatus();
+    handleSelectStoreId(trimmed);
   };
 
   const handleCopySQL = () => {
@@ -144,7 +174,7 @@ export const SupabaseSyncManager: React.FC = () => {
   const handleForceFullSync = async () => {
     setIsSyncing(true);
     try {
-      info('Sinkronisasi Berjalan', 'Mengambil data terbaru dari Cloud Supabase...');
+      info('Sinkronisasi Berjalan', `Mengambil data terbaru untuk store "${storeId}" dari Cloud Supabase...`);
       await Promise.allSettled([
         fetchProductsDirect(storeId),
         fetchTransactionsDirect(storeId),
@@ -153,7 +183,7 @@ export const SupabaseSyncManager: React.FC = () => {
         fetchStaffAccountsDirect(storeId),
       ]);
       await checkSupabaseStatus();
-      success('Sinkronisasi Sukses', 'Semua data telah sinkron antara Supabase dan memori lokal perangkat ini!');
+      success('Sinkronisasi Sukses', `Semua data toko "${storeId}" telah sinkron dengan Cloud Supabase!`);
     } catch (err: any) {
       toastError('Sinkronisasi Terkendala', err.message || 'Gagal menyinkronkan data.');
     } finally {
@@ -172,14 +202,14 @@ export const SupabaseSyncManager: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-white">Sinkronisasi Multi-Device & Database Supabase</h3>
+                <h3 className="text-lg font-bold text-white">Developer Database & Supabase Multi-Device Engine</h3>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                   <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
                   Realtime Active
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-1">
-                Supabase PostgreSQL adalah <b>Single Source of Truth (SSOT)</b>. Perubahan di satu HP/Laptop langsung muncul di perangkat lain secara instan.
+                Supabase PostgreSQL adalah <b>Single Source of Truth (SSOT)</b> terpusat. Seluruh pelanggan dan perangkat tersinkronisasi otomatis di latar belakang tanpa perlu menyentuh pengaturan database teknis.
               </p>
             </div>
           </div>
@@ -205,14 +235,33 @@ export const SupabaseSyncManager: React.FC = () => {
               <Store className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Store ID (Kunci Partisi Multi-Perangkat)</h4>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Tenant Store Partition Inspector</h4>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Semua perangkat kasir, tablet, dan HP pemilik yang menggunakan Store ID yang sama akan tersinkronisasi 100%.
+                Pilih atau masukkan Store ID pelanggan untuk memeriksa dan menyinkronkan data toko terkait.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+            {/* Quick CRM Tenant Dropdown */}
+            {crmUsers.length > 0 && (
+              <select
+                value={storeId}
+                onChange={(e) => handleSelectStoreId(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="default_store">Default Store (default_store)</option>
+                {crmUsers.map((u) => {
+                  const sId = u.id || u.namaToko?.toLowerCase().replace(/\s+/g, '_') || 'store';
+                  return (
+                    <option key={u.id} value={sId}>
+                      {u.namaToko} ({u.namaPemilik}) - [{sId}]
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+
             {isEditingStoreId ? (
               <div className="flex items-center gap-2">
                 <input
@@ -226,7 +275,7 @@ export const SupabaseSyncManager: React.FC = () => {
                   onClick={handleSaveStoreId}
                   className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 cursor-pointer"
                 >
-                  Simpan
+                  Terapkan
                 </button>
                 <button
                   onClick={() => setIsEditingStoreId(false)}
@@ -244,7 +293,7 @@ export const SupabaseSyncManager: React.FC = () => {
                   onClick={() => setIsEditingStoreId(true)}
                   className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500/10 text-slate-700 dark:text-slate-300 hover:text-emerald-600 text-xs font-semibold border border-slate-200 dark:border-slate-700 cursor-pointer transition-all"
                 >
-                  Ubah ID Toko
+                  Kustom ID
                 </button>
               </div>
             )}
@@ -256,15 +305,15 @@ export const SupabaseSyncManager: React.FC = () => {
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-start gap-3">
             <Smartphone className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
             <div>
-              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">HP Kasir 1 / Mobile</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Input penjualan langsung realtime memotong stok di cloud.</div>
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">HP Kasir Pelanggan</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Input penjualan langsung realtime memotong stok di cloud Postgres.</div>
             </div>
           </div>
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-start gap-3">
             <Laptop className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
             <div>
-              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Laptop Pemilik / Admin</div>
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Laptop / Tablet Pemilik Toko</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Melihat omzet & stok terbaru seketika tanpa perlu refresh halaman.</div>
             </div>
           </div>
@@ -273,7 +322,7 @@ export const SupabaseSyncManager: React.FC = () => {
             <Zap className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
             <div>
               <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Supabase Postgres Engine</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Mendistribusikan notifikasi perubahan data lewat WebSocket channel.</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Mendistribusikan notifikasi perubahan data lewat WebSocket channel otomatis.</div>
             </div>
           </div>
         </div>
@@ -362,10 +411,11 @@ export const SupabaseSyncManager: React.FC = () => {
         <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <div>
-            <b>Panduan Setup Supabase:</b> Buka dashboard Supabase Anda &rarr; Klik menu <b>SQL Editor</b> di sidebar kiri &rarr; Klik <b>+ New query</b> &rarr; Paste skema SQL di atas &rarr; Klik <b>Run</b>. Semua tabel, kolom <code>store_id</code>, dan realtime publication akan terpasang otomatis!
+            <b>Panduan Setup Supabase (Developer):</b> Buka dashboard Supabase Anda &rarr; Klik menu <b>SQL Editor</b> di sidebar kiri &rarr; Klik <b>+ New query</b> &rarr; Paste skema SQL di atas &rarr; Klik <b>Run</b>. Semua tabel, kolom <code>store_id</code>, dan realtime publication akan terpasang otomatis untuk semua toko!
           </div>
         </div>
       </div>
     </div>
   );
 };
+

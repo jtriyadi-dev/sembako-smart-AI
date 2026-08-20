@@ -19,6 +19,9 @@ import {
   getSupabaseClient, 
   getCurrentStoreId, 
   subscribeRealtimeTable, 
+  queryTableWithFallback,
+  upsertWithColumnFallback,
+  isMissingColumnError,
   logSupabase 
 } from './supabaseClient';
 
@@ -98,14 +101,7 @@ export async function fetchProductsDirectRest(overrideStoreId?: string): Promise
     try {
       logSupabase('query', `Mengambil data produk untuk Store ID: "${storeId}"...`);
       
-      let queryBuilder = supabase.from('products').select('*');
-      
-      // Multi-tenant store filter: match store_id or default_store or unassigned rows
-      if (storeId && storeId !== 'all') {
-        queryBuilder = queryBuilder.or(`store_id.eq.${storeId},store_id.eq.default_store,store_id.is.null`);
-      }
-
-      const { data, error } = await queryBuilder.order('created_at', { ascending: false });
+      const { data, error } = await queryTableWithFallback(supabase, 'products', storeId, 'created_at', false);
 
       if (error) {
         logSupabase('error', `Gagal fetch produk dari Supabase: ${error.message} (Code: ${error.code})`, error);
@@ -354,7 +350,7 @@ export async function seedSampleProducts(): Promise<void> {
         updated_at: now,
       }));
 
-      const { error } = await supabase.from('products').upsert(rows, { onConflict: 'id' });
+      const { error } = await upsertWithColumnFallback(supabase, 'products', rows, 'id');
       if (error) {
         logSupabase('error', 'Gagal seed produk ke Supabase:', error);
       } else {
@@ -408,7 +404,7 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { error } = await supabase.from('products').upsert([{
+      const { error } = await upsertWithColumnFallback(supabase, 'products', [{
         id: cleanProduct.id,
         store_id: storeId,
         kode: cleanProduct.kode,
@@ -428,7 +424,7 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
         terjual: cleanProduct.terjual || 0,
         created_at: now,
         updated_at: now,
-      }], { onConflict: 'id' });
+      }], 'id');
 
       if (error) {
         logSupabase('error', `Gagal menambahkan produk ke Supabase: ${error.message}`, error);
@@ -496,7 +492,13 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
       if (product.terjual !== undefined) sbUpdate.terjual = product.terjual;
       if (storeId) sbUpdate.store_id = storeId;
 
-      const { error } = await supabase.from('products').update(sbUpdate).eq('id', id);
+      let { error } = await supabase.from('products').update(sbUpdate).eq('id', id);
+      if (error && isMissingColumnError(error)) {
+        delete sbUpdate.store_id;
+        const retry = await supabase.from('products').update(sbUpdate).eq('id', id);
+        error = retry.error;
+      }
+
       if (error) {
         logSupabase('error', `Gagal update produk ${id} di Supabase: ${error.message}`, error);
       } else {

@@ -14,6 +14,7 @@ import {
   MASTER_DEV_EMAIL
 } from '../services/devCrmService';
 import { SUPABASE_SCHEMA_SQL } from '../services/supabaseClient';
+import { SupabaseSyncManager } from '../components/SupabaseSyncManager';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -88,7 +89,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const [pinError, setPinError] = useState('');
 
   // Active Control Panel Tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'keys' | 'cms' | 'logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'database' | 'keys' | 'cms' | 'logs'>('overview');
 
   // CRM Users State
   const [crmUsers, setCrmUsers] = useState<CrmUser[]>([]);
@@ -672,6 +673,17 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
             CRM Pelanggan ({crmUsers.length})
           </button>
           <button
+            onClick={() => setActiveTab('database')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              activeTab === 'database'
+                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+                : 'text-slate-300 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Database className="w-4 h-4" />
+            Database & Cloud Sync
+          </button>
+          <button
             onClick={() => setActiveTab('cms')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'cms'
@@ -1133,6 +1145,15 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: DATABASE & MULTI-DEVICE SUPABASE CLOUD SYNC */}
+      {/* ========================================================================= */}
+      {activeTab === 'database' && (
+        <div className="space-y-6">
+          <SupabaseSyncManager />
         </div>
       )}
 
