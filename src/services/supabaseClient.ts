@@ -238,21 +238,23 @@ export async function initPublicSupabaseConfig(): Promise<SupabaseClient | null>
     return existingClient;
   }
 
-  // 3. Auto-fetch from Server Backend public endpoint
+  // 3. Auto-fetch from Server Backend public endpoint (only in non-static local environment)
   try {
-    const res = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(3500) });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.configured && data.supabaseUrl && data.supabaseAnonKey) {
-        console.log('[Supabase Auto-Discovery] Berhasil mendapatkan konfigurasi Supabase dari server pusat!');
-        const toSave = {
-          supabaseUrl: sanitizeSupabaseUrl(data.supabaseUrl),
-          supabaseAnonKey: sanitizeSupabaseKey(data.supabaseAnonKey),
-          updatedAt: new Date().toISOString()
-        };
-        localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
-        localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
-        return getSupabaseClient(toSave.supabaseUrl, toSave.supabaseAnonKey);
+    if (typeof window !== 'undefined' && !window.location.hostname.includes('vercel.app')) {
+      const res = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.configured && data.supabaseUrl && data.supabaseAnonKey) {
+          console.log('[Supabase Auto-Discovery] Berhasil mendapatkan konfigurasi Supabase dari server!');
+          const toSave = {
+            supabaseUrl: sanitizeSupabaseUrl(data.supabaseUrl),
+            supabaseAnonKey: sanitizeSupabaseKey(data.supabaseAnonKey),
+            updatedAt: new Date().toISOString()
+          };
+          localStorage.setItem('sembako_developer_api_keys', JSON.stringify(toSave));
+          localStorage.setItem('sem_api_keys', JSON.stringify(toSave));
+          return getSupabaseClient(toSave.supabaseUrl, toSave.supabaseAnonKey);
+        }
       }
     }
   } catch (_) {}

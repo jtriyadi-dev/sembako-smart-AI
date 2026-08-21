@@ -29,21 +29,38 @@ async function safeJsonFetch(url: string, options?: RequestInit): Promise<{ ok: 
 }
 
 export async function fetchRemoteConfig(): Promise<RemoteAppConfig> {
-  // 1. Try fetching from Backend Express Server
+  // 1. Check Supabase first if available
   try {
-    const { ok, data } = await safeJsonFetch('/api/developer/config', {
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(2000)
-    });
-    if (ok && data && data.config) {
-      try {
-        localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.config));
-      } catch (e) {}
-      return data.config;
+    const sbClient = getSupabaseClient();
+    if (sbClient) {
+      const { data } = await sbClient.from('remote_config').select('config').eq('id', 'app_remote_config').maybeSingle();
+      if (data && data.config) {
+        try {
+          localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.config));
+        } catch (e) {}
+        return data.config;
+      }
     }
-  } catch (err) {}
+  } catch (e) {}
 
-  // 2. Fallback to localStorage
+  // 2. Try fetching from Backend Express Server (only in non-static local environment)
+  const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+  if (!isVercel) {
+    try {
+      const { ok, data } = await safeJsonFetch('/api/developer/config', {
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(1500)
+      });
+      if (ok && data && data.config) {
+        try {
+          localStorage.setItem(LOCAL_STORAGE_REMOTE_CONFIG, JSON.stringify(data.config));
+        } catch (e) {}
+        return data.config;
+      }
+    } catch (err) {}
+  }
+
+  // 3. Fallback to localStorage
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_REMOTE_CONFIG);
     if (cached) {
@@ -52,7 +69,7 @@ export async function fetchRemoteConfig(): Promise<RemoteAppConfig> {
     }
   } catch (e) {}
 
-  // 3. Fallback to DEFAULT_REMOTE_CONFIG
+  // 4. Fallback to DEFAULT_REMOTE_CONFIG
   return DEFAULT_REMOTE_CONFIG;
 }
 
@@ -110,20 +127,9 @@ export async function saveRemoteConfig(
 
 export async function fetchCrmUsers(devSecret: string = ''): Promise<CrmUser[]> {
   let serverUsers: CrmUser[] = [];
-  try {
-    const { ok, data } = await safeJsonFetch('/api/developer/users', {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${devSecret || 'master-dev-token'}`
-      },
-      signal: AbortSignal.timeout(3000)
-    });
-    if (ok && data && Array.isArray(data.users) && data.users.length > 0) {
-      serverUsers = data.users;
-    }
-  } catch (err) {}
+  const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
-  // Query Supabase directly from client if available
+  // 1. Prioritize direct Supabase Cloud query
   try {
     const sbClient = getSupabaseClient();
     if (sbClient) {
@@ -150,22 +156,35 @@ export async function fetchCrmUsers(devSecret: string = ''): Promise<CrmUser[]> 
           totalTransactions: 0
         }));
 
-        const mergedMap = new Map<string, CrmUser>();
-        serverUsers.forEach(u => { if (u.email) mergedMap.set(u.email.toLowerCase(), u); });
-        mapped.forEach(u => { if (u.email) mergedMap.set(u.email.toLowerCase(), u); });
-        serverUsers = Array.from(mergedMap.values());
+        try {
+          localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(mapped));
+        } catch (e) {}
+        return mapped;
       }
     }
   } catch (e) {}
 
-  if (serverUsers.length > 0) {
+  // 2. Try server API only in local environment
+  if (!isVercel) {
     try {
-      localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(serverUsers));
-    } catch (e) {}
-    return serverUsers;
+      const { ok, data } = await safeJsonFetch('/api/developer/users', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${devSecret || 'master-dev-token'}`
+        },
+        signal: AbortSignal.timeout(1500)
+      });
+      if (ok && data && Array.isArray(data.users) && data.users.length > 0) {
+        serverUsers = data.users;
+        try {
+          localStorage.setItem(LOCAL_STORAGE_CRM_USERS, JSON.stringify(serverUsers));
+        } catch (e) {}
+        return serverUsers;
+      }
+    } catch (err) {}
   }
 
-  // Fallback to local storage
+  // 3. Fallback to local storage
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_CRM_USERS);
     if (cached) {
@@ -353,56 +372,49 @@ export async function deleteCrmUser(
 // ==========================================
 
 export async function fetchDeveloperApiKeys(devSecret: string = ''): Promise<DeveloperApiKeys> {
-  let keysResult: DeveloperApiKeys | null = null;
-
-  // 1. Try server backend endpoint
+  // 1. Check LocalStorage first
   try {
-    const { ok, data } = await safeJsonFetch('/api/developer/keys', {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${devSecret || 'master-dev-token'}`
-      },
-      signal: AbortSignal.timeout(3000)
-    });
-    if (ok && data && data.keys) {
-      keysResult = data.keys;
+    const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS) || localStorage.getItem('sem_api_keys');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && (parsed.supabaseUrl || parsed.geminiApiKey || parsed.waApiKey)) {
+        return { ...DEFAULT_API_KEYS, ...parsed };
+      }
     }
-  } catch (err) {}
+  } catch (e) {}
 
-  // 2. Direct Supabase Cloud query if server returned empty/default keys
-  if (!keysResult || (!keysResult.geminiApiKey && !keysResult.waApiKey)) {
-    try {
-      const { getSupabaseClient } = await import('./supabaseClient');
-      const sb = getSupabaseClient();
-      if (sb) {
-        const { data } = await sb.from('remote_config').select('config').eq('id', 'app_api_keys').maybeSingle();
-        if (data && data.config) {
-          keysResult = {
-            ...DEFAULT_API_KEYS,
-            ...(keysResult || {}),
-            ...data.config
-          };
-        }
-      }
-    } catch (_) {}
-  }
+  let keysResult: DeveloperApiKeys | null = null;
+  const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
-  // 3. Fallback: Check public supabase config endpoint
-  if (!keysResult || !keysResult.supabaseUrl) {
-    try {
-      const pubRes = await fetch('/api/public/supabase-config', { signal: AbortSignal.timeout(2500) });
-      if (pubRes.ok) {
-        const pubData = await pubRes.json();
-        if (pubData && pubData.configured) {
-          keysResult = {
-            ...DEFAULT_API_KEYS,
-            ...(keysResult || {}),
-            supabaseUrl: pubData.supabaseUrl,
-            supabaseAnonKey: pubData.supabaseAnonKey,
-          };
-        }
+  // 2. Direct Supabase Cloud query
+  try {
+    const { getSupabaseClient } = await import('./supabaseClient');
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data } = await sb.from('remote_config').select('config').eq('id', 'app_api_keys').maybeSingle();
+      if (data && data.config) {
+        keysResult = {
+          ...DEFAULT_API_KEYS,
+          ...data.config
+        };
       }
-    } catch (_) {}
+    }
+  } catch (_) {}
+
+  // 3. Try server backend endpoint only in non-static local environment
+  if (!isVercel && !keysResult) {
+    try {
+      const { ok, data } = await safeJsonFetch('/api/developer/keys', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${devSecret || 'master-dev-token'}`
+        },
+        signal: AbortSignal.timeout(1500)
+      });
+      if (ok && data && data.keys) {
+        keysResult = data.keys;
+      }
+    } catch (err) {}
   }
 
   if (keysResult) {
@@ -419,13 +431,6 @@ export async function fetchDeveloperApiKeys(devSecret: string = ''): Promise<Dev
     } catch (e) {}
     return keysResult;
   }
-
-  try {
-    const cached = localStorage.getItem(LOCAL_STORAGE_API_KEYS) || localStorage.getItem('sem_api_keys');
-    if (cached) {
-      return { ...DEFAULT_API_KEYS, ...JSON.parse(cached) };
-    }
-  } catch (e) {}
 
   return DEFAULT_API_KEYS;
 }

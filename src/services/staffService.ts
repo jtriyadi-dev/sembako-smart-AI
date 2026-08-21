@@ -272,17 +272,7 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
     }
   }
 
-  // 2. Express Server
-  try {
-    fetch('/api/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staff: newAccount }),
-      signal: AbortSignal.timeout(4000)
-    }).catch(() => {});
-  } catch (e) {}
-
-  // 3. Firestore
+  // 2. Firestore
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, newAccount.id);
     const { id, ...data } = newAccount;
@@ -351,19 +341,7 @@ export async function updateStaffAccount(id: string, updates: Partial<StaffAccou
     }
   }
 
-  // 2. Express Server
-  if (updatedStaff) {
-    try {
-      fetch('/api/staff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff: updatedStaff }),
-        signal: AbortSignal.timeout(4000)
-      }).catch(() => {});
-    } catch (e) {}
-  }
-
-  // 3. Firestore
+  // 2. Firestore
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
     const { id: _, ...dataToSave } = updates as any;
@@ -384,10 +362,6 @@ export async function deleteStaffAccount(id: string): Promise<void> {
       logSupabase('sync', `Akun staf ${id} dihapus dari Supabase`);
     } catch (e) {}
   }
-
-  try {
-    fetch(`/api/staff/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(4000) }).catch(() => {});
-  } catch (e) {}
 
   try {
     const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
@@ -438,28 +412,7 @@ export async function findStaffByCredentials(identifier: string, password: strin
       (s.password === cleanPass || (!s.password && cleanPass === 'password123') || cleanPass === '123456')
   );
 
-  if (foundLocal) {
-    return foundLocal;
-  }
-
-  // Fallback to server /api/staff
-  try {
-    const res = await fetch('/api/staff', { signal: AbortSignal.timeout(2500) });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.staff)) {
-        saveLocalStaffAccounts(data.staff);
-        const found = data.staff.find(
-          (s: StaffAccount) =>
-            (s.username.toLowerCase() === cleanId || (s.email && s.email.toLowerCase() === cleanId)) &&
-            (s.password === cleanPass || (!s.password && cleanPass === 'password123') || cleanPass === '123456')
-        );
-        if (found) return found;
-      }
-    }
-  } catch (e) {}
-
-  return null;
+  return foundLocal || null;
 }
 
 export async function updateStaffLastLogin(id: string): Promise<void> {
