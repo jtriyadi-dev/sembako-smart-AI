@@ -301,13 +301,19 @@ async function startServer() {
             sender: String(sender),
             rawBody: body,
             messageText,
-            status: "success",
-            actionTaken: `Data "${nama}" berhasil diproses via format Multiline. Total Stok: ${result.updatedStock}`,
+            status: result.success ? "success" : "error",
+            actionTaken: result.success 
+              ? `Data "${nama}" berhasil diproses via format Multiline. Total Stok: ${result.updatedStock}` 
+              : `Gagal memproses data "${nama}" ke database: ${result.message}`,
           };
           recentWebhooks.unshift(logItem);
           saveWebhookLogs(recentWebhooks);
 
           return res.json({
+            status: result.success,
+            message: result.message,
+            reply: result.message,
+            product_id: result.productId,
             data: [
               {
                 message: result.message
@@ -357,13 +363,19 @@ async function startServer() {
           sender: String(sender),
           rawBody: body,
           messageText,
-          status: "success",
-          actionTaken: `Data "${nama}" berhasil disimpan. Total Stok: ${result.updatedStock}`,
+          status: result.success ? "success" : "error",
+          actionTaken: result.success 
+            ? `Data "${nama}" berhasil disimpan ke Supabase. Total Stok: ${result.updatedStock}`
+            : `Gagal menyimpan "${nama}" ke Supabase: ${result.message}`,
         };
         recentWebhooks.unshift(logItem);
         saveWebhookLogs(recentWebhooks);
 
         return res.json({
+          status: result.success,
+          message: result.message,
+          reply: result.message,
+          product_id: result.productId,
           data: [
             {
               message: result.message

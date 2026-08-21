@@ -1,5 +1,151 @@
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+// Helper to get server-side Supabase client
+function getSupabaseServerClient(): SupabaseClient | null {
+  const url = (
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    'https://wwnvddrmwxkomkkbhfep.supabase.co'
+  ).trim().replace(/\/+$/, '');
+
+  const key = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    ''
+  ).trim().replace(/^bearer\s+/i, '');
+
+  if (!url || !key) {
+    console.error('[WA WEBHOOK] Missing SUPABASE_URL or SUPABASE_ANON_KEY in server environment');
+    return null;
+  }
+
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+
+// Map sender phone to store_id and store name
+function resolveStoreInfo(sender: string): { storeId: string; storeName: string } {
+  const clean = (sender || '').replace(/\D/g, '');
+  
+  if (clean.includes('85223335816')) {
+    return { storeId: 'store_toko_sembako_samsidi', storeName: 'Toko Sembako Samsidi' };
+  }
+  if (clean.includes('81234567890')) {
+    return { storeId: 'store_toko_berkah_sembako_utama', storeName: 'Toko Berkah Sembako Utama' };
+  }
+  if (clean.includes('85712345678')) {
+    return { storeId: 'store_warung_sembako_barokah', storeName: 'Warung Sembako Barokah' };
+  }
+  if (clean.includes('81398765432')) {
+    return { storeId: 'store_minimarket_sumber_rezeki', storeName: 'Minimarket Sumber Rezeki' };
+  }
+  
+  // Default to Toko Sembako Samsidi
+  return { storeId: 'store_toko_sembako_samsidi', storeName: 'Toko Sembako Samsidi' };
+}
+
+interface ParsedProduct {
+  name: string;
+  category: string;
+  purchase_price: number;
+  selling_price: number;
+  stock: number;
+  unit: string;
+  minimum_stock: number;
+}
+
+// Parse WhatsApp product message
+function parseProductMessage(messageText: string): ParsedProduct | null {
+  const upper = messageText.toUpperCase();
+  
+  // 1. Delimited Format: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok
+  if (upper.startsWith('PRODUK#') || upper.startsWith('PRODUK|') || upper.startsWith('PRODUK:') || (messageText.includes('#') && messageText.split('#').length >= 3)) {
+    const delimiter = messageText.includes('#') ? '#' : messageText.includes('|') ? '|' : ':';
+    const parts = messageText.split(delimiter).map(p => p.trim());
+    const startIndex = parts[0].toUpperCase() === 'PRODUK' || parts[0].toUpperCase() === 'TAMBAH' ? 1 : 0;
+
+    const name = parts[startIndex] || '';
+    if (!name) return null;
+
+    const category = parts[startIndex + 1] || 'Sembako & Bumbu';
+    const purchase_price = parseInt(parts[startIndex + 2]?.replace(/\D/g, '') || '0', 10);
+    const rawSellingPrice = parseInt(parts[startIndex + 3]?.replace(/\D/g, '') || '0', 10);
+    const selling_price = rawSellingPrice > 0 ? rawSellingPrice : Math.round(purchase_price * 1.15) || 12000;
+    const stock = parseInt(parts[startIndex + 4]?.replace(/\D/g, '') || '10', 10);
+    const unit = parts[startIndex + 5] || 'Pcs';
+    const minimum_stock = parseInt(parts[startIndex + 6]?.replace(/\D/g, '') || '5', 10);
+
+    return {
+      name,
+      category,
+      purchase_price,
+      selling_price,
+      stock,
+      unit,
+      minimum_stock
+    };
+  }
+
+  // 2. Multiline Format
+  if (messageText.includes('\n') && (upper.includes('NAMA') || upper.includes('PRODUK') || upper.includes('HARGA') || upper.includes('STOK'))) {
+    const lines = messageText.split('\n').map(l => l.trim()).filter(Boolean);
+    let name = '';
+    let category = 'Sembako & Bumbu';
+    let purchase_price = 0;
+    let selling_price = 0;
+    let stock = 10;
+    let unit = 'Pcs';
+    let minimum_stock = 5;
+
+    lines.forEach(line => {
+      const lUpper = line.toUpperCase();
+      if (lUpper.startsWith('NAMA') || lUpper.startsWith('PRODUK')) {
+        name = line.split(/[:#=-]/).slice(1).join(':').trim() || name;
+      } else if (lUpper.startsWith('KATEGORI')) {
+        category = line.split(/[:#=-]/).slice(1).join(':').trim() || category;
+      } else if (lUpper.includes('BELI') || lUpper.includes('MODAL') || lUpper.includes('KULAK')) {
+        const num = parseInt(line.replace(/\D/g, ''), 10);
+        if (!isNaN(num) && num > 0) purchase_price = num;
+      } else if (lUpper.includes('JUAL') || lUpper.includes('HARGA')) {
+        const num = parseInt(line.replace(/\D/g, ''), 10);
+        if (!isNaN(num) && num > 0) selling_price = num;
+      } else if (lUpper.startsWith('STOK') || lUpper.startsWith('JUMLAH') || lUpper.startsWith('QTY')) {
+        const num = parseInt(line.replace(/\D/g, ''), 10);
+        if (!isNaN(num)) stock = num;
+      } else if (lUpper.startsWith('SATUAN')) {
+        unit = line.split(/[:#=-]/).slice(1).join(':').trim() || unit;
+      } else if (lUpper.includes('MIN')) {
+        const num = parseInt(line.replace(/\D/g, ''), 10);
+        if (!isNaN(num)) minimum_stock = num;
+      }
+    });
+
+    if (!name && lines.length > 0) {
+      name = lines[0].replace(/^(PRODUK|TAMBAH PRODUK|TAMBAH)\s*[:#=-]?\s*/i, '').trim();
+    }
+
+    if (name) {
+      return {
+        name,
+        category,
+        purchase_price,
+        selling_price: selling_price || Math.round(purchase_price * 1.15) || 12000,
+        stock,
+        unit,
+        minimum_stock
+      };
+    }
+  }
+
+  return null;
+}
+
 export default async function handler(req: any, res: any) {
-  // Always set CORS headers first
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -8,33 +154,32 @@ export default async function handler(req: any, res: any) {
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
   );
 
+  const method = (req.method || 'GET').toUpperCase();
+
+  if (method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // GET Verification & Health Check
+  if (method === 'GET') {
+    const hubChallenge = req.query ? req.query['hub.challenge'] : null;
+    if (hubChallenge) {
+      return res.status(200).send(String(hubChallenge));
+    }
+    return res.status(200).json({
+      status: true,
+      message: '✅ [POS Toko Sembako] Webhook WhatsApp Vercel Serverless Function Aktif & Siap',
+      service: 'Sembako Smart AI WhatsApp Webhook Listener',
+      supportedCommands: [
+        'PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok',
+        'STOK#NamaProduk#JumlahTambah',
+        '!stok (Cek Ringkasan Stok Toko)'
+      ]
+    });
+  }
+
   try {
-    const method = (req.method || 'GET').toUpperCase();
-
-    // 1. Handle Preflight OPTIONS Request
-    if (method === 'OPTIONS') {
-      return res.status(200).end();
-    }
-
-    // 2. Handle GET Request (Meta / Gateway Challenge or Ping)
-    if (method === 'GET') {
-      const hubChallenge = req.query ? req.query['hub.challenge'] : null;
-      if (hubChallenge) {
-        return res.status(200).send(String(hubChallenge));
-      }
-      return res.status(200).json({
-        status: true,
-        message: '✅ [POS Toko Sembako] Webhook WhatsApp Vercel Serverless Function Aktif & Siap',
-        reply: '✅ [POS Toko Sembako] Webhook WhatsApp Vercel Serverless Function Aktif & Siap',
-        data: [
-          {
-            message: '✅ [POS Toko Sembako] Webhook WhatsApp Vercel Serverless Function Aktif & Siap'
-          }
-        ]
-      });
-    }
-
-    // 3. Safe Request Body Extraction
+    // 1. Safe Request Body Extraction
     let body = req.body || {};
     if (typeof body === 'string') {
       try {
@@ -69,434 +214,458 @@ export default async function handler(req: any, res: any) {
     }
 
     // Extract Sender and Message
-    const sender = String(body.sender || body.from || body.phone || body.wa_number || body.number || body.pushName || body.sender_number || 'WhatsApp User');
+    const sender = String(
+      body.sender || 
+      body.from || 
+      body.phone || 
+      body.wa_number || 
+      body.number || 
+      body.pushName || 
+      body.sender_number || 
+      'WhatsApp User'
+    );
     const rawMsg = body.message || body.text || body.body || body.caption || body.payload || body.pesan || body.text_message || '';
     const messageText = typeof rawMsg === 'string' ? rawMsg.trim() : typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg).trim();
 
-    // 4. Default Empty Message Response (Gateway Test Ping)
     if (!messageText) {
       const pingMsg = '✅ [POS Toko Sembako] Webhook terkoneksi dengan sukses! Layanan bot siap menerima perintah STOK# dan PRODUK#.';
       return res.status(200).json({
         status: true,
         message: pingMsg,
         reply: pingMsg,
-        data: [
-          {
-            message: pingMsg
-          }
-        ]
+        data: [{ message: pingMsg }]
       });
     }
 
-    let replyMsg = '';
+    const upperMsg = messageText.toUpperCase();
 
-    // Fetch live products from Supabase + Cloud Sync
-    const products = await fetchUnifiedProducts();
+    // Initialize Supabase Server Client
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      console.error('[WA PRODUCT] Supabase server client failed to initialize');
+      return res.status(200).json({
+        status: false,
+        message: '❌ Koneksi server Supabase belum terkonfigurasi.',
+        error: 'SUPABASE_URL or SUPABASE_KEY is missing',
+        reply: '❌ [POS Toko Sembako] Gagal terhubung ke database cloud Supabase.',
+        data: [{ message: '❌ [POS Toko Sembako] Gagal terhubung ke database cloud Supabase.' }]
+      });
+    }
 
-    // 5. Command STOK# (Tambah stok produk)
-    const isStockOnlyCmd = (messageText.toUpperCase().startsWith('STOK#') || messageText.toUpperCase().startsWith('TAMBAHSTOK#')) && messageText.includes('#');
+    // Identify Store ID
+    const { storeId, storeName } = resolveStoreInfo(sender);
+
+    // =========================================================================
+    // FLOW A: PRODUK# (TAMBAH / INSERT PRODUK BARU KE SUPABASE)
+    // =========================================================================
+    const isProductCmd = upperMsg.startsWith('PRODUK#') || 
+                         upperMsg.startsWith('PRODUK|') || 
+                         upperMsg.startsWith('PRODUK:') || 
+                         upperMsg.startsWith('TAMBAH#') ||
+                         (messageText.includes('#') && (upperMsg.includes('PRODUK') || upperMsg.includes('SEMBAKO') || messageText.split('#').length >= 4)) ||
+                         (messageText.includes('\n') && (upperMsg.includes('NAMA') || upperMsg.includes('PRODUK')));
+
+    if (isProductCmd) {
+      const parsed = parseProductMessage(messageText);
+
+      // STEP 2: LOG SELURUH FLOW
+      console.log('[WA PRODUCT] RAW MESSAGE:', messageText);
+      console.log('[WA PRODUCT] PARSED:', parsed);
+      console.log('[WA PRODUCT] STORE ID:', storeId);
+
+      if (!parsed || !parsed.name) {
+        return res.status(200).json({
+          status: false,
+          message: 'Format pesan produk tidak valid. Contoh: PRODUK#Tepung Segitiga Biru 1kg#Bumbu & Tepung#11000#13000#25#Kg#5',
+          reply: '❌ Format pesan tidak valid. Gunakan: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok',
+          data: [{ message: '❌ Format pesan tidak valid. Gunakan: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok' }]
+        });
+      }
+
+      // Check if product already exists in Supabase
+      const { data: existingProds } = await supabase
+        .from('products')
+        .select('*')
+        .eq('store_id', storeId)
+        .ilike('nama', parsed.name)
+        .limit(1);
+
+      const existingProduct = existingProds && existingProds.length > 0 ? existingProds[0] : null;
+
+      if (existingProduct) {
+        // UPDATE EXISTING PRODUCT
+        const oldStock = Number(existingProduct.stok) || 0;
+        const newStock = oldStock + parsed.stock;
+        const now = new Date().toISOString();
+
+        const updatePayload: Record<string, any> = {
+          stok: newStock,
+          updated_at: now
+        };
+        if (parsed.purchase_price > 0) updatePayload.harga_beli = parsed.purchase_price;
+        if (parsed.selling_price > 0) updatePayload.harga_jual = parsed.selling_price;
+        if (parsed.category) updatePayload.kategori = parsed.category;
+        if (parsed.unit) updatePayload.satuan = parsed.unit;
+
+        console.log('[WA PRODUCT] UPDATE PAYLOAD:', updatePayload);
+
+        const { data: updateData, error: updateError } = await supabase
+          .from('products')
+          .update(updatePayload)
+          .eq('id', existingProduct.id)
+          .select()
+          .single();
+
+        console.log('[WA PRODUCT] SUPABASE DATA:', updateData);
+        console.log('[WA PRODUCT] SUPABASE ERROR:', updateError);
+
+        if (updateError || !updateData) {
+          console.error('[WA PRODUCT UPDATE FAILED]', {
+            message: updateError?.message,
+            code: updateError?.code,
+            details: updateError?.details,
+            hint: updateError?.hint
+          });
+          return res.status(200).json({
+            status: false,
+            message: 'Produk gagal diperbarui di database.',
+            error: updateError?.message,
+            reply: `❌ [POS Toko Sembako] Gagal memperbarui stok "${parsed.name}" ke database.`,
+            data: [{ message: `❌ [POS Toko Sembako] Gagal memperbarui stok "${parsed.name}" ke database.` }]
+          });
+        }
+
+        // STEP 9: VERIFIKASI SETELAH UPDATE
+        const { data: verifyData, error: verifyError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', updateData.id)
+          .single();
+
+        console.log('[WA PRODUCT VERIFY]', verifyData);
+
+        if (verifyError || !verifyData) {
+          return res.status(200).json({
+            status: false,
+            message: 'Verifikasi produk di database gagal setelah update.',
+            reply: `❌ [POS Toko Sembako] Verifikasi database gagal untuk "${parsed.name}".`,
+            data: [{ message: `❌ [POS Toko Sembako] Verifikasi database gagal untuk "${parsed.name}".` }]
+          });
+        }
+
+        // Record stock movement log in Supabase
+        try {
+          await supabase.from('stock_movements').insert([{
+            store_id: storeId,
+            produk_id: String(updateData.id),
+            nama_produk: updateData.nama,
+            kode_produk: updateData.kode || '',
+            tipe: 'masuk',
+            jumlah: parsed.stock,
+            stok_awal: oldStock,
+            stok_akhir: newStock,
+            keterangan: `Tambah stok via WhatsApp (${sender})`,
+            operator: 'WhatsApp Bot',
+            created_at: now
+          }]);
+        } catch (_) {}
+
+        const replyMsg = `✅ [POS Toko Sembako] Produk "${parsed.name}" BERHASIL DIPERBARUI!\n\n` +
+                         `📦 Stok Awal: ${oldStock} ${parsed.unit}\n` +
+                         `➕ Tambahan: +${parsed.stock} ${parsed.unit}\n` +
+                         `📊 Total Stok Sekarang: ${newStock} ${parsed.unit}\n` +
+                         `💰 Harga Jual: Rp ${Number(updateData.harga_jual).toLocaleString('id-ID')}\n` +
+                         `🏬 Toko: ${storeName}`;
+
+        return res.status(200).json({
+          status: true,
+          message: replyMsg,
+          reply: replyMsg,
+          product_id: updateData.id,
+          data: [{ message: replyMsg }]
+        });
+
+      } else {
+        // STEP 3: INSERT NEW PRODUCT TO TABLE products
+        const now = new Date().toISOString();
+        const sku = `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const payload = {
+          store_id: storeId,
+          kode: sku,
+          nama: parsed.name,
+          kategori: parsed.category,
+          harga_beli: parsed.purchase_price,
+          harga_jual: parsed.selling_price,
+          stok: parsed.stock,
+          satuan: parsed.unit,
+          min_stok: parsed.minimum_stock,
+          terjual: 0,
+          created_at: now,
+          updated_at: now
+        };
+
+        console.log('[WA PRODUCT] INSERT PAYLOAD:', payload);
+
+        // STEP 3: INSERT Supabase
+        const { data, error } = await supabase
+          .from('products')
+          .insert([payload])
+          .select()
+          .single();
+
+        console.log('[WA PRODUCT] SUPABASE DATA:', data);
+        console.log('[WA PRODUCT] SUPABASE ERROR:', error);
+
+        if (error || !data) {
+          console.error('[WA PRODUCT INSERT FAILED]', {
+            message: error?.message,
+            code: error?.code,
+            details: error?.details,
+            hint: error?.hint
+          });
+
+          return res.status(200).json({
+            status: false,
+            message: 'Produk gagal disimpan ke database.',
+            error: error?.message,
+            reply: `❌ [POS Toko Sembako] Produk "${parsed.name}" gagal disimpan ke database. (${error?.message || 'Database error'})`,
+            data: [{ message: `❌ [POS Toko Sembako] Produk "${parsed.name}" gagal disimpan ke database.` }]
+          });
+        }
+
+        // STEP 9: VERIFIKASI INSERT SETELAH INSERT
+        const { data: verifyData, error: verifyError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', data.id)
+          .single();
+
+        console.log('[WA PRODUCT VERIFY]', verifyData);
+
+        if (verifyError || !verifyData) {
+          console.error('[WA PRODUCT VERIFICATION FAILED]', verifyError);
+          return res.status(200).json({
+            status: false,
+            message: 'Verifikasi produk di database gagal.',
+            error: verifyError?.message,
+            reply: `❌ [POS Toko Sembako] Verifikasi data gagal untuk "${parsed.name}".`,
+            data: [{ message: `❌ [POS Toko Sembako] Verifikasi data gagal untuk "${parsed.name}".` }]
+          });
+        }
+
+        // Record stock movement log in Supabase
+        try {
+          await supabase.from('stock_movements').insert([{
+            store_id: storeId,
+            produk_id: String(data.id),
+            nama_produk: data.nama,
+            kode_produk: data.kode || sku,
+            tipe: 'masuk',
+            jumlah: parsed.stock,
+            stok_awal: 0,
+            stok_akhir: parsed.stock,
+            keterangan: `Produk baru diinput via WhatsApp (${sender})`,
+            operator: 'WhatsApp Bot',
+            created_at: now
+          }]);
+        } catch (_) {}
+
+        // STEP 10: RESPONSE YANG BENAR - ONLY AFTER STRICT DATABASE INSERT & VERIFICATION SUCCESS
+        const replyMsg = `✅ [POS Toko Sembako] Produk baru "${parsed.name}" BERHASIL DITAMBAHKAN!\n\n` +
+                         `📦 Stok Awal: ${parsed.stock} ${parsed.unit}\n` +
+                         `💰 Harga Jual: Rp ${parsed.selling_price.toLocaleString('id-ID')}\n` +
+                         `🏷️ Kategori: ${parsed.category}\n` +
+                         `🏬 Toko: ${storeName}`;
+
+        return res.status(200).json({
+          status: true,
+          message: replyMsg,
+          reply: replyMsg,
+          product_id: data.id,
+          data: [{ message: replyMsg }]
+        });
+      }
+    }
+
+    // =========================================================================
+    // FLOW B: STOK# (TAMBAH STOK CEPAT)
+    // =========================================================================
+    const isStockOnlyCmd = (upperMsg.startsWith('STOK#') || upperMsg.startsWith('TAMBAHSTOK#')) && messageText.includes('#');
+
     if (isStockOnlyCmd) {
-      const parts = messageText.split('#').map((p: string) => p.trim());
-      const nama = parts[1] || 'Produk';
+      const parts = messageText.split('#').map(p => p.trim());
+      const namaProduk = parts[1] || '';
       const addedStock = parseInt(parts[2]?.replace(/\D/g, '') || '0', 10);
 
-      const { product: matchedProduct, index: matchedIndex } = findMatchingProductInList(nama, products);
+      console.log('[WA STOCK] RAW MESSAGE:', messageText);
+      console.log('[WA STOCK] NAMA:', namaProduk, '| ADDED:', addedStock);
+      console.log('[WA STOCK] STORE ID:', storeId);
 
-      if (matchedProduct && matchedIndex >= 0) {
-        const oldStock = Number(matchedProduct.stok) || 0;
-        const newTotalStock = oldStock + addedStock;
-        const satuanStr = matchedProduct.satuan || 'Pcs';
+      if (!namaProduk || addedStock <= 0) {
+        return res.status(200).json({
+          status: false,
+          message: 'Format perintah stok tidak valid. Contoh: STOK#Beras Setra Ramos#10',
+          reply: '❌ Format salah. Gunakan: STOK#NamaProduk#JumlahTambah',
+          data: [{ message: '❌ Format salah. Gunakan: STOK#NamaProduk#JumlahTambah' }]
+        });
+      }
+
+      // Find matching product in Supabase
+      const { data: matchedRows } = await supabase
+        .from('products')
+        .select('*')
+        .eq('store_id', storeId)
+        .ilike('nama', `%${namaProduk}%`)
+        .limit(1);
+
+      if (matchedRows && matchedRows.length > 0) {
+        const prod = matchedRows[0];
+        const oldStock = Number(prod.stok) || 0;
+        const newStock = oldStock + addedStock;
         const now = new Date().toISOString();
 
-        products[matchedIndex].stok = newTotalStock;
-        products[matchedIndex].updatedAt = now;
+        const { data: updateData, error: updateError } = await supabase
+          .from('products')
+          .update({ stok: newStock, updated_at: now })
+          .eq('id', prod.id)
+          .select()
+          .single();
 
-        // 1. Sync to Supabase PostgreSQL
-        await syncProductToSupabase(products[matchedIndex]);
-        // 2. Backup to Cloud Store
-        await saveCloudProducts(products);
+        if (updateError || !updateData) {
+          console.error('[WA STOCK UPDATE FAILED]', updateError);
+          return res.status(200).json({
+            status: false,
+            message: 'Stok gagal diperbarui ke database.',
+            error: updateError?.message,
+            reply: `❌ [POS Toko Sembako] Gagal update stok "${prod.nama}".`,
+            data: [{ message: `❌ [POS Toko Sembako] Gagal update stok "${prod.nama}".` }]
+          });
+        }
 
-        replyMsg = `✅ [POS Toko Sembako] Stok "${matchedProduct.nama}" BERHASIL DITAMBAHKAN!\n\n` +
-                   `📦 Stok Awal: ${oldStock} ${satuanStr}\n` +
-                   `➕ Tambahan: +${addedStock} ${satuanStr}\n` +
-                   `📊 Total Stok Sekarang: ${newTotalStock} ${satuanStr}`;
+        // Verify
+        const { data: verifyData, error: verifyError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', updateData.id)
+          .single();
+
+        if (verifyError || !verifyData) {
+          return res.status(200).json({
+            status: false,
+            message: 'Verifikasi database gagal.',
+            reply: `❌ Verifikasi database gagal untuk "${prod.nama}".`,
+            data: [{ message: `❌ Verifikasi database gagal untuk "${prod.nama}".` }]
+          });
+        }
+
+        const replyMsg = `✅ [POS Toko Sembako] Stok "${prod.nama}" BERHASIL DITAMBAHKAN!\n\n` +
+                         `📦 Stok Awal: ${oldStock} ${prod.satuan || 'Pcs'}\n` +
+                         `➕ Tambahan: +${addedStock} ${prod.satuan || 'Pcs'}\n` +
+                         `📊 Total Stok Sekarang: ${newStock} ${prod.satuan || 'Pcs'}\n` +
+                         `🏬 Toko: ${storeName}`;
+
+        return res.status(200).json({
+          status: true,
+          message: replyMsg,
+          reply: replyMsg,
+          product_id: updateData.id,
+          data: [{ message: replyMsg }]
+        });
+
       } else {
-        // Create new product if not found
+        // Product does not exist -> create new
         const now = new Date().toISOString();
-        const newProd = {
-          id: `prod-${Date.now()}`,
-          kode: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-          barcode: `${Math.floor(8990000000000 + Math.random() * 9999999)}`,
-          nama: nama,
+        const sku = `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
+        const payload = {
+          store_id: storeId,
+          kode: sku,
+          nama: namaProduk,
           kategori: 'Sembako Utama',
-          hargaBeli: 10000,
-          hargaJual: 12000,
+          harga_beli: 10000,
+          harga_jual: 12000,
           stok: addedStock,
-          minStok: 5,
           satuan: 'Pcs',
-          gambarUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400',
-          deskripsi: `Diimpor otomatis via WA (${sender})`,
+          min_stok: 5,
           terjual: 0,
-          createdAt: now,
-          updatedAt: now
+          created_at: now,
+          updated_at: now
         };
-        products.unshift(newProd);
 
-        // 1. Sync to Supabase PostgreSQL
-        await syncProductToSupabase(newProd);
-        // 2. Backup to Cloud Store
-        await saveCloudProducts(products);
+        const { data: insertData, error: insertError } = await supabase
+          .from('products')
+          .insert([payload])
+          .select()
+          .single();
 
-        replyMsg = `✅ [POS Toko Sembako] Produk baru "${nama}" BERHASIL DITAMBAHKAN!\n\n` +
-                   `📦 Stok Awal: ${addedStock} Pcs\n` +
-                   `📊 Total Stok Sekarang: ${addedStock} Pcs`;
-      }
-    } 
-    // 6. Command PRODUK# (Tambah/Update produk baru)
-    else if (messageText.toUpperCase().startsWith('PRODUK#') || (messageText.includes('#') && messageText.split('#').length >= 3)) {
-      const parts = messageText.split('#').map((p: string) => p.trim());
-      const startIndex = parts[0].toUpperCase() === 'PRODUK' ? 1 : 0;
+        if (insertError || !insertData) {
+          return res.status(200).json({
+            status: false,
+            message: 'Produk gagal disimpan ke database.',
+            error: insertError?.message,
+            reply: `❌ Gagal menambahkan produk baru "${namaProduk}".`,
+            data: [{ message: `❌ Gagal menambahkan produk baru "${namaProduk}".` }]
+          });
+        }
 
-      const nama = parts[startIndex] || 'Produk WA Bot';
-      const kategori = parts[startIndex + 1] || 'Sembako Utama';
-      const hargaBeli = parseInt(parts[startIndex + 2]?.replace(/\D/g, '') || '10000', 10);
-      const hargaJual = parseInt(parts[startIndex + 3]?.replace(/\D/g, '') || '12000', 10);
-      const stok = parseInt(parts[startIndex + 4]?.replace(/\D/g, '') || '10', 10);
-      const satuan = parts[startIndex + 5] || 'Pcs';
-      const now = new Date().toISOString();
+        const replyMsg = `✅ [POS Toko Sembako] Produk baru "${namaProduk}" BERHASIL DITAMBAHKAN!\n\n` +
+                         `📦 Stok Awal: ${addedStock} Pcs\n` +
+                         `🏬 Toko: ${storeName}`;
 
-      const { product: matchedProduct, index: matchedIndex } = findMatchingProductInList(nama, products);
-
-      if (matchedProduct && matchedIndex >= 0) {
-        const oldStock = Number(matchedProduct.stok) || 0;
-        const newTotalStock = oldStock + stok;
-
-        products[matchedIndex].stok = newTotalStock;
-        if (hargaBeli > 0) products[matchedIndex].hargaBeli = hargaBeli;
-        if (hargaJual > 0) products[matchedIndex].hargaJual = hargaJual;
-        if (kategori) products[matchedIndex].kategori = kategori;
-        if (satuan) products[matchedIndex].satuan = satuan;
-        products[matchedIndex].updatedAt = now;
-
-        // 1. Sync to Supabase PostgreSQL
-        await syncProductToSupabase(products[matchedIndex]);
-        // 2. Backup to Cloud Store
-        await saveCloudProducts(products);
-
-        replyMsg = `✅ [POS Toko Sembako] Produk "${matchedProduct.nama}" BERHASIL DIPERBARUI!\n\n` +
-                   `📦 Stok Awal: ${oldStock} ${satuan}\n` +
-                   `➕ Tambahan Stok: +${stok} ${satuan}\n` +
-                   `📊 Total Stok Sekarang: ${newTotalStock} ${satuan}\n` +
-                   `💰 Harga Jual: Rp ${hargaJual.toLocaleString('id-ID')}`;
-      } else {
-        const newProd = {
-          id: `prod-${Date.now()}`,
-          kode: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-          barcode: `${Math.floor(8990000000000 + Math.random() * 9999999)}`,
-          nama: nama,
-          kategori: kategori,
-          hargaBeli: hargaBeli,
-          hargaJual: hargaJual,
-          stok: stok,
-          minStok: 5,
-          satuan: satuan,
-          gambarUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400',
-          deskripsi: `Diimpor otomatis via WA (${sender})`,
-          terjual: 0,
-          createdAt: now,
-          updatedAt: now
-        };
-        products.unshift(newProd);
-
-        // 1. Sync to Supabase PostgreSQL
-        await syncProductToSupabase(newProd);
-        // 2. Backup to Cloud Store
-        await saveCloudProducts(products);
-
-        replyMsg = `✅ [POS Toko Sembako] Produk baru "${nama}" BERHASIL DITAMBAHKAN!\n\n` +
-                   `📦 Stok Awal: ${stok} ${satuan}\n` +
-                   `💰 Harga Jual: Rp ${hargaJual.toLocaleString('id-ID')}\n` +
-                   `🏷️ Kategori: ${kategori}`;
+        return res.status(200).json({
+          status: true,
+          message: replyMsg,
+          reply: replyMsg,
+          product_id: insertData.id,
+          data: [{ message: replyMsg }]
+        });
       }
     }
-    // 7. Command !stok or !cekstok
-    else if (messageText.toLowerCase().startsWith('!stok') || messageText.toLowerCase().startsWith('!cekstok')) {
-      const topItems = products.slice(0, 6).map((p: any) => `• ${p.nama}: ${p.stok} ${p.satuan || 'Pcs'}`).join('\n');
-      replyMsg = `📦 [POS Toko Sembako] Info Stok Barang (${products.length} item):\n\n${topItems}\n\n` +
-                 'Gunakan format:\n' +
-                 '• Tambah Stok: STOK#Nama#Jumlah\n' +
-                 '• Produk Baru: PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan';
-    }
-    // 8. Default Instruction Reply
-    else {
-      replyMsg = 'ℹ️ [POS Toko Sembako] Format pesan tidak dikenali.\n\n' +
-                 '• Tambah Stok Saja:\nSTOK#Nama#JumlahStokBaru\n\n' +
-                 '• Tambah/Update Produk Baru:\nPRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok';
+
+    // =========================================================================
+    // FLOW C: !stok / !cekstok (RINGKASAN STOK)
+    // =========================================================================
+    if (upperMsg.startsWith('!STOK') || upperMsg.startsWith('!CEKSTOK') || upperMsg === 'STOK' || upperMsg === 'CEK STOK') {
+      const { data: prods } = await supabase
+        .from('products')
+        .select('*')
+        .eq('store_id', storeId)
+        .order('created_at', { ascending: false })
+        .limit(8);
+
+      const itemsList = (prods || []).map(p => `• ${p.nama}: ${p.stok} ${p.satuan || 'Pcs'} (Rp ${Number(p.harga_jual).toLocaleString('id-ID')})`).join('\n');
+      const replyMsg = `📦 *[POS TOKO SEMBAKO - INFO STOK]*\n🏬 Toko: ${storeName}\n\n*Daftar Produk Terkini:*\n${itemsList || '(Belum ada produk)'}\n\n_Ketik PRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan untuk menambah produk baru._`;
+
+      return res.status(200).json({
+        status: true,
+        message: replyMsg,
+        reply: replyMsg,
+        data: [{ message: replyMsg }]
+      });
     }
 
-    // Standard multi-gateway compatible response
+    // Default Reply for unparsed messages
+    const defaultMsg = 'ℹ️ *[POS Toko Sembako AI Bot]*\n\n' +
+                       'Format yang didukung:\n' +
+                       '1. *Tambah Produk Baru:*\nPRODUK#Nama#Kategori#HargaBeli#HargaJual#Stok#Satuan#MinStok\n\n' +
+                       '2. *Tambah Stok Cepat:*\nSTOK#NamaProduk#JumlahTambah\n\n' +
+                       '3. *Cek Stok:*\n!stok';
+
     return res.status(200).json({
       status: true,
-      message: replyMsg,
-      reply: replyMsg,
-      data: [
-        {
-          message: replyMsg
-        }
-      ]
+      message: defaultMsg,
+      reply: defaultMsg,
+      data: [{ message: defaultMsg }]
     });
 
   } catch (err: any) {
-    console.error('[WhatsApp Webhook Error]:', err);
-    // GUARANTEED HTTP 200 OK Response so Vercel & WA Gateway never report 500 FUNCTION_INVOCATION_FAILED
-    const fallbackMsg = '✅ [POS Toko Sembako] Webhook terkoneksi dan menerima pesan.';
+    console.error('[WA WEBHOOK CRITICAL ERROR]', err);
     return res.status(200).json({
-      status: true,
-      message: fallbackMsg,
-      reply: fallbackMsg,
-      data: [
-        {
-          message: fallbackMsg
-        }
-      ]
+      status: false,
+      message: `Terjadi kendala pemrosesan webhook: ${err?.message || 'Internal error'}`,
+      error: err?.message,
+      reply: '❌ Terjadi kendala saat memproses permintaan WhatsApp.',
+      data: [{ message: '❌ Terjadi kendala saat memproses permintaan WhatsApp.' }]
     });
   }
-}
-
-const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
-
-const INITIAL_FALLBACK_PRODUCTS = [
-  { id: 'prod-1', kode: 'BRS-001', barcode: '8991001100012', nama: 'Beras Setra Ramos Super 5kg', kategori: 'Sembako Utama', hargaBeli: 65000, hargaJual: 72000, stok: 35, minStok: 10, satuan: 'Sak', terjual: 142, gambarUrl: '', deskripsi: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-  { id: 'prod-2', kode: 'MNY-002', barcode: '8992002200029', nama: 'Minyak Goreng Tropical Refill 2L', kategori: 'Minyak & Lemak', hargaBeli: 33000, hargaJual: 38000, stok: 24, minStok: 10, satuan: 'Pouch', terjual: 98, gambarUrl: '', deskripsi: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-  { id: 'prod-3', kode: 'GLA-003', barcode: '8993003300036', nama: 'Gula Pasir Premium Gulaku 1kg', kategori: 'Sembako Utama', hargaBeli: 14500, hargaJual: 17000, stok: 40, minStok: 15, satuan: 'Kg', terjual: 85, gambarUrl: '', deskripsi: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-];
-
-function getSupabaseConfig(): { url: string; key: string } | null {
-  const url = (
-    process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    ''
-  ).trim().replace(/\/+$/, '');
-
-  const key = (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    ''
-  ).trim().replace(/^bearer\s+/i, '');
-
-  if (url && key && url.startsWith('http')) {
-    return { url, key };
-  }
-  return null;
-}
-
-async function fetchProductsFromSupabase(): Promise<any[]> {
-  const cfg = getSupabaseConfig();
-  if (!cfg) return [];
-
-  try {
-    const res = await fetch(`${cfg.url}/rest/v1/products?select=*&order=created_at.desc`, {
-      method: 'GET',
-      headers: {
-        apikey: cfg.key,
-        Authorization: `Bearer ${cfg.key}`
-      },
-      signal: AbortSignal.timeout(3500)
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((r: any) => ({
-          id: String(r.id),
-          storeId: r.store_id || 'default_store',
-          kode: r.kode || `SKU-${String(r.id).substring(0, 5).toUpperCase()}`,
-          barcode: r.barcode || '',
-          nama: r.nama || 'Produk Sembako',
-          kategori: r.kategori || 'Sembako Utama',
-          hargaBeli: Number(r.harga_beli) || 0,
-          hargaJual: Number(r.harga_jual) || 0,
-          stok: Number(r.stok) || 0,
-          minStok: Number(r.min_stok) || 5,
-          satuan: r.satuan || 'Pcs',
-          gambarUrl: r.gambar_url || '',
-          deskripsi: r.deskripsi || '',
-          expiredDate: r.expired_date || '',
-          batchNo: r.batch_no || '',
-          supplierNama: r.supplier || '',
-          terjual: Number(r.terjual) || 0,
-          createdAt: r.created_at || new Date().toISOString(),
-          updatedAt: r.updated_at || new Date().toISOString(),
-        }));
-      }
-    }
-  } catch (e) {
-    console.warn('[Webhook Vercel] Supabase fetch error:', e);
-  }
-  return [];
-}
-
-async function fetchUnifiedProducts(): Promise<any[]> {
-  // 1. Try Supabase first
-  const sbProds = await fetchProductsFromSupabase();
-  if (sbProds.length > 0) {
-    return sbProds;
-  }
-
-  // 2. Fallback to Cloud Store
-  return await fetchCloudProducts();
-}
-
-async function syncProductToSupabase(p: any): Promise<boolean> {
-  const cfg = getSupabaseConfig();
-  if (!cfg) {
-    console.warn('[Webhook Vercel] Supabase configuration not found in environment');
-    return false;
-  }
-
-  const payload: any = {
-    id: String(p.id),
-    store_id: p.storeId || p.store_id || 'default_store',
-    kode: p.kode || `SKU-${String(p.id).substring(0, 5).toUpperCase()}`,
-    barcode: p.barcode || null,
-    nama: p.nama,
-    kategori: p.kategori || 'Sembako Utama',
-    harga_beli: Number(p.hargaBeli ?? p.harga_beli) || 0,
-    harga_jual: Number(p.hargaJual ?? p.harga_jual) || 0,
-    stok: Number(p.stok) || 0,
-    min_stok: Number(p.minStok ?? p.min_stok) || 5,
-    satuan: p.satuan || 'Pcs',
-    gambar_url: p.gambarUrl || p.gambar_url || null,
-    deskripsi: p.deskripsi || null,
-    expired_date: p.expiredDate || p.expired_date || null,
-    batch_no: p.batchNo || p.batch_no || null,
-    supplier: p.supplierNama || p.supplier || null,
-    terjual: Number(p.terjual) || 0,
-    updated_at: p.updatedAt || new Date().toISOString(),
-    created_at: p.createdAt || new Date().toISOString()
-  };
-
-  try {
-    const res = await fetch(`${cfg.url}/rest/v1/products?on_conflict=id`, {
-      method: 'POST',
-      headers: {
-        apikey: cfg.key,
-        Authorization: `Bearer ${cfg.key}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates,return=representation'
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(4000)
-    });
-
-    if (res.ok) {
-      console.log(`[Webhook Vercel] Product "${p.nama}" successfully synced to Supabase`);
-      return true;
-    }
-
-    const errText = await res.text();
-    console.warn(`[Webhook Vercel] Supabase upsert returned ${res.status}:`, errText);
-
-    // If missing store_id column in custom table, retry without store_id
-    if (errText.includes('store_id') || res.status === 400 || res.status === 404) {
-      delete payload.store_id;
-      const retryRes = await fetch(`${cfg.url}/rest/v1/products?on_conflict=id`, {
-        method: 'POST',
-        headers: {
-          apikey: cfg.key,
-          Authorization: `Bearer ${cfg.key}`,
-          'Content-Type': 'application/json',
-          Prefer: 'resolution=merge-duplicates,return=representation'
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(3000)
-      });
-      if (retryRes.ok) {
-        console.log(`[Webhook Vercel] Product "${p.nama}" synced to Supabase on retry`);
-        return true;
-      }
-    }
-  } catch (e: any) {
-    console.error('[Webhook Vercel] Error syncing to Supabase:', e?.message || e);
-  }
-
-  return false;
-}
-
-async function fetchCloudProducts(): Promise<any[]> {
-  try {
-    const res = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(3000) });
-    if (res.ok) {
-      const json = await res.json();
-      const prods = json?.data?.products;
-      if (Array.isArray(prods) && prods.length > 0) {
-        return prods;
-      }
-    }
-  } catch (e) {
-    console.warn('[Webhook Vercel] Could not fetch cloud products:', e);
-  }
-  return [...INITIAL_FALLBACK_PRODUCTS];
-}
-
-async function saveCloudProducts(products: any[]): Promise<void> {
-  try {
-    await fetch(CLOUD_STORE_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Sembako Store Products V1',
-        data: { products }
-      }),
-      signal: AbortSignal.timeout(3000)
-    });
-  } catch (e) {
-    console.warn('[Webhook Vercel] Could not save cloud products:', e);
-  }
-}
-
-function findMatchingProductInList(targetName: string, productsList: any[]): { product: any | null; index: number } {
-  if (!targetName) return { product: null, index: -1 };
-
-  const s = targetName.trim().toLowerCase();
-  const cleanS = s.replace(/[^a-z0-9]/g, '');
-
-  if (!cleanS) return { product: null, index: -1 };
-
-  let bestIndex = -1;
-  let highestScore = 0;
-
-  productsList.forEach((p, idx) => {
-    const d = (p.nama || '').trim().toLowerCase();
-    const cleanD = d.replace(/[^a-z0-9]/g, '');
-
-    let score = 0;
-
-    if (d === s) score = 100;
-    else if (cleanD === cleanS) score = 90;
-    else if (cleanD.length >= 3 && cleanS.length >= 3 && (cleanD.includes(cleanS) || cleanS.includes(cleanD))) {
-      score = 70;
-    } else {
-      const tokensS = s.split(/\s+/).filter(t => t.length > 1);
-      const tokensD = d.split(/\s+/).filter(t => t.length > 1);
-      const matched = tokensS.filter(ts => tokensD.some(td => td.includes(ts) || ts.includes(td)));
-      if (matched.length > 0) {
-        score = Math.round((matched.length / tokensS.length) * 60);
-      }
-    }
-
-    if (score > highestScore) {
-      highestScore = score;
-      bestIndex = idx;
-    }
-  });
-
-  if (highestScore >= 30 && bestIndex >= 0) {
-    return { product: productsList[bestIndex], index: bestIndex };
-  }
-
-  return { product: null, index: -1 };
 }

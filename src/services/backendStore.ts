@@ -1448,190 +1448,311 @@ export function findMatchingProduct(targetName: string): { product: ProdukItem |
   return { product: null, index: -1 };
 }
 
-export async function processProductWebhook(input: ProductInput): Promise<{ message: string; updatedStock: number; isNew: boolean }> {
+export function resolveStoreIdBackend(sender: string): { storeId: string; storeName: string } {
+  const clean = (sender || '').replace(/\D/g, '');
+  if (clean.includes('85223335816')) {
+    return { storeId: 'store_toko_sembako_samsidi', storeName: 'Toko Sembako Samsidi' };
+  }
+  if (clean.includes('81234567890')) {
+    return { storeId: 'store_toko_berkah_sembako_utama', storeName: 'Toko Berkah Sembako Utama' };
+  }
+  if (clean.includes('85712345678')) {
+    return { storeId: 'store_warung_sembako_barokah', storeName: 'Warung Sembako Barokah' };
+  }
+  if (clean.includes('81398765432')) {
+    return { storeId: 'store_minimarket_sumber_rezeki', storeName: 'Minimarket Sumber Rezeki' };
+  }
+  return { storeId: 'store_toko_sembako_samsidi', storeName: 'Toko Sembako Samsidi' };
+}
+
+export async function processProductWebhook(input: ProductInput): Promise<{ message: string; updatedStock: number; isNew: boolean; success: boolean; productId?: string }> {
+  const rawSender = input.sender || 'WhatsApp';
+  const { storeId, storeName } = resolveStoreIdBackend(rawSender);
+  const targetName = (input?.nama || 'Produk').toString().trim();
+  const now = new Date().toISOString();
+
+  // STEP 2: LOG SELURUH FLOW
+  const parsedData = {
+    name: targetName,
+    category: input.kategori || 'Sembako & Bumbu',
+    purchase_price: input.hargaBeli || 10000,
+    selling_price: input.hargaJual || Math.round((input.hargaBeli || 10000) * 1.15),
+    stock: input.stok || 10,
+    unit: input.satuan || 'Pcs',
+    minimum_stock: input.minStok || 5
+  };
+
+  console.log('[WA PRODUCT] RAW MESSAGE:', `PRODUK#${targetName}#${parsedData.category}#${parsedData.purchase_price}#${parsedData.selling_price}#${parsedData.stock}#${parsedData.unit}#${parsedData.minimum_stock}`);
+  console.log('[WA PRODUCT] PARSED:', parsedData);
+  console.log('[WA PRODUCT] STORE ID:', storeId);
+
+  const sb = getSupabaseConfigBackend();
+  if (!sb) {
+    console.error('[WA PRODUCT] Supabase server configuration missing!');
+    return {
+      message: '❌ [POS Toko Sembako] Konfigurasi server database Supabase belum aktif.',
+      updatedStock: 0,
+      isNew: false,
+      success: false
+    };
+  }
+
   try {
-    const targetName = (input?.nama || 'Produk').toString().trim();
-    const now = new Date().toISOString();
-
-    // 0. Ensure we have the latest Supabase products loaded into memory
+    // 1. Check if product already exists in Supabase for this store
+    let existingProduct: any = null;
     try {
-      await fetchProductsFromSupabaseBackend();
-    } catch (_) {}
+      const checkRes = await fetch(`${sb.url}/rest/v1/products?store_id=eq.${encodeURIComponent(storeId)}&nama=ilike.${encodeURIComponent(targetName)}&limit=1`, {
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`
+        },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (checkRes.ok) {
+        const rows = await checkRes.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          existingProduct = rows[0];
+        }
+      }
+    } catch (e) {}
 
-    const { product: matchedProduct, index: matchedIndex } = findMatchingProduct(targetName);
-
-    if (matchedProduct && matchedIndex >= 0) {
-      // 1. UPDATE EXISTING PRODUCT STOCK
-      const oldStock = Number(matchedProduct.stok) || 0;
+    if (existingProduct) {
+      // UPDATE EXISTING PRODUCT
+      const oldStock = Number(existingProduct.stok) || 0;
       const addedStock = Number(input.stok) || 0;
       const newTotalStock = oldStock + addedStock;
 
-      const updatedProduct: ProdukItem = {
-        ...matchedProduct,
+      const updatePayload: Record<string, any> = {
         stok: newTotalStock,
-        updatedAt: now
+        updated_at: now
       };
+      if (parsedData.purchase_price > 0) updatePayload.harga_beli = parsedData.purchase_price;
+      if (parsedData.selling_price > 0) updatePayload.harga_jual = parsedData.selling_price;
+      if (parsedData.category) updatePayload.kategori = parsedData.category;
+      if (parsedData.unit) updatePayload.satuan = parsedData.unit;
 
-      if (input.hargaBeli && input.hargaBeli > 0) updatedProduct.hargaBeli = input.hargaBeli;
-      if (input.hargaJual && input.hargaJual > 0) updatedProduct.hargaJual = input.hargaJual;
-      if (input.kategori && input.kategori !== 'Sembako & Bumbu') updatedProduct.kategori = input.kategori;
-      if (input.satuan && input.satuan !== 'Pcs') updatedProduct.satuan = input.satuan;
+      console.log('[WA PRODUCT] UPDATE PAYLOAD:', updatePayload);
 
-      inMemoryProducts[matchedIndex] = updatedProduct;
-      saveLocalProductsToFile();
+      const patchRes = await fetch(`${sb.url}/rest/v1/products?id=eq.${encodeURIComponent(existingProduct.id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(updatePayload),
+        signal: AbortSignal.timeout(4000)
+      });
 
-      // Primary Sync: Update Supabase Cloud Database (PostgreSQL)
-      try {
-        await updateSupabaseProductStockBackend(matchedProduct.id, newTotalStock, now);
-      } catch (err: any) {
-        console.warn('[Supabase Stock Update Error]:', err?.message);
+      if (!patchRes.ok) {
+        const errText = await patchRes.text().catch(() => '');
+        console.error('[WA PRODUCT UPDATE FAILED]', {
+          message: errText,
+          code: patchRes.status
+        });
+        return {
+          message: `❌ [POS Toko Sembako] Gagal memperbarui stok "${targetName}" ke database.`,
+          updatedStock: oldStock,
+          isNew: false,
+          success: false
+        };
       }
 
-      // Secondary Firestore REST Sync
-      try {
-        const patchUrl = `${BASE_FIRESTORE_URL}/products/${matchedProduct.id}?updateMask.fieldPaths=stok&updateMask.fieldPaths=updatedAt&key=${FIREBASE_API_KEY}`;
-        fetch(patchUrl, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: {
-              stok: { integerValue: String(newTotalStock) },
-              updatedAt: { stringValue: now }
-            }
-          })
-        }).catch(err => console.warn('Firestore optional patch ignored:', err.message));
-      } catch (e) {
-        // ignore optional firestore error
+      const updateData = await patchRes.json().catch(() => []);
+      console.log('[WA PRODUCT] SUPABASE DATA:', updateData);
+      console.log('[WA PRODUCT] SUPABASE ERROR:', null);
+
+      // STEP 9: VERIFIKASI SETELAH UPDATE
+      const verifyRes = await fetch(`${sb.url}/rest/v1/products?id=eq.${encodeURIComponent(existingProduct.id)}&select=*`, {
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`
+        },
+        signal: AbortSignal.timeout(4000)
+      });
+      const verifyData = verifyRes.ok ? await verifyRes.json() : null;
+      console.log('[WA PRODUCT VERIFY]', verifyData);
+
+      if (!verifyData || !Array.isArray(verifyData) || verifyData.length === 0) {
+        return {
+          message: `❌ [POS Toko Sembako] Verifikasi database gagal untuk "${targetName}".`,
+          updatedStock: oldStock,
+          isNew: false,
+          success: false
+        };
       }
 
-      const satuanStr = input.satuan || matchedProduct.satuan || 'Pcs';
-      const msg = `✅ [POS Toko Sembako] Stok "${matchedProduct.nama}" BERHASIL DITAMBAHKAN!\n\n` +
+      // Record stock movement log in Supabase
+      fetch(`${sb.url}/rest/v1/stock_movements`, {
+        method: 'POST',
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([{
+          store_id: storeId,
+          produk_id: String(existingProduct.id),
+          nama_produk: existingProduct.nama,
+          kode_produk: existingProduct.kode || '',
+          tipe: 'masuk',
+          jumlah: addedStock,
+          stok_awal: oldStock,
+          stok_akhir: newTotalStock,
+          keterangan: `Tambah stok via WhatsApp (${rawSender})`,
+          operator: 'WhatsApp Bot',
+          created_at: now
+        }])
+      }).catch(() => {});
+
+      const satuanStr = parsedData.unit;
+      const msg = `✅ [POS Toko Sembako] Produk "${existingProduct.nama}" BERHASIL DIPERBARUI!\n\n` +
                   `📦 Stok Awal: ${oldStock} ${satuanStr}\n` +
                   `➕ Tambahan: +${addedStock} ${satuanStr}\n` +
-                  `📊 Total Stok Sekarang: ${newTotalStock} ${satuanStr}`;
-
-      console.log(`[BackendStore SUCCESS] Updated "${matchedProduct.nama}": ${oldStock} -> ${newTotalStock}`);
-
-      // Log webhook to Supabase
-      logWebhookToSupabaseBackend({
-        sender: input.sender || 'WhatsApp',
-        messageText: `STOK#${matchedProduct.nama}#+${addedStock}`,
-        rawBody: input,
-        status: 'success',
-        actionTaken: `Stok "${matchedProduct.nama}" diperbarui: ${oldStock} -> ${newTotalStock}`
-      }).catch(() => {});
+                  `📊 Total Stok Sekarang: ${newTotalStock} ${satuanStr}\n` +
+                  `💰 Harga Jual: Rp ${parsedData.selling_price.toLocaleString('id-ID')}\n` +
+                  `🏬 Toko: ${storeName}`;
 
       return {
         message: msg,
         updatedStock: newTotalStock,
-        isNew: false
+        isNew: false,
+        success: true,
+        productId: existingProduct.id
       };
 
     } else {
-      // 2. CREATE NEW PRODUCT
-      const newId = `prod-${Date.now()}`;
+      // 2. INSERT NEW PRODUCT TO TABLE products
       const sku = `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
-      const barcode = `${Math.floor(8990000000000 + Math.random() * 9999999)}`;
-      const hargaBeli = input.hargaBeli || 10000;
-      const hargaJual = input.hargaJual || Math.round(hargaBeli * 1.15);
-      const satuan = input.satuan || 'Pcs';
-      const minStok = input.minStok || 5;
-
-      const newProd: ProdukItem = {
-        id: newId,
+      const payload = {
+        store_id: storeId,
         kode: sku,
-        barcode: barcode,
-        nama: input.nama,
-        kategori: input.kategori || 'Sembako Utama',
-        hargaBeli: hargaBeli,
-        hargaJual: hargaJual,
-        stok: input.stok,
-        minStok: minStok,
-        satuan: satuan,
-        gambarUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400',
-        deskripsi: `Diimpor otomatis via WhatsApp Webhook (${input.sender || 'WhatsApp'})`,
-        expiredDate: '',
-        batchNo: '',
+        nama: parsedData.name,
+        kategori: parsedData.category,
+        harga_beli: parsedData.purchase_price,
+        harga_jual: parsedData.selling_price,
+        stok: parsedData.stock,
+        satuan: parsedData.unit,
+        min_stok: parsedData.minimum_stock,
         terjual: 0,
-        createdAt: now,
-        updatedAt: now
+        created_at: now,
+        updated_at: now
       };
 
-      inMemoryProducts.unshift(newProd);
-      saveLocalProductsToFile();
+      console.log('[WA PRODUCT] INSERT PAYLOAD:', payload);
 
-      // Primary Sync: Insert into Supabase Cloud Database (PostgreSQL)
-      try {
-        await syncProductToSupabaseBackend(newProd);
-      } catch (err: any) {
-        console.warn('[Supabase New Product Insert Error]:', err?.message);
+      const insertRes = await fetch(`${sb.url}/rest/v1/products`, {
+        method: 'POST',
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!insertRes.ok) {
+        const errText = await insertRes.text().catch(() => '');
+        console.error('[WA PRODUCT INSERT FAILED]', {
+          message: errText,
+          code: insertRes.status
+        });
+        return {
+          message: `❌ [POS Toko Sembako] Produk "${parsedData.name}" gagal disimpan ke database. (${errText})`,
+          updatedStock: 0,
+          isNew: true,
+          success: false
+        };
       }
 
-      // Secondary Firestore REST Sync
-      try {
-        const postUrl = `${BASE_FIRESTORE_URL}/products?key=${FIREBASE_API_KEY}`;
-        fetch(postUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: toFirestoreFields({
-              kode: sku,
-              barcode: barcode,
-              nama: input.nama,
-              kategori: newProd.kategori,
-              hargaBeli: hargaBeli,
-              hargaJual: hargaJual,
-              stok: input.stok,
-              minStok: minStok,
-              satuan: satuan,
-              gambarUrl: newProd.gambarUrl,
-              deskripsi: newProd.deskripsi,
-              terjual: 0,
-              createdAt: now,
-              updatedAt: now
-            })
-          })
-        }).catch(err => console.warn('Firestore optional post ignored:', err.message));
-      } catch (e) {
-        // ignore optional firestore error
+      const insertData = await insertRes.json().catch(() => []);
+      console.log('[WA PRODUCT] SUPABASE DATA:', insertData);
+      console.log('[WA PRODUCT] SUPABASE ERROR:', null);
+
+      const savedRow = Array.isArray(insertData) && insertData.length > 0 ? insertData[0] : null;
+      if (!savedRow || !savedRow.id) {
+        return {
+          message: `❌ [POS Toko Sembako] Gagal mengonfirmasi penyimpanan produk "${parsedData.name}".`,
+          updatedStock: 0,
+          isNew: true,
+          success: false
+        };
       }
 
-      const msg = `✅ [POS Toko Sembako] Produk baru "${input.nama}" BERHASIL DITAMBAHKAN ke katalog toko dengan stok awal ${input.stok} ${satuan}!`;
+      // STEP 9: VERIFIKASI INSERT SETELAH INSERT
+      const verifyRes = await fetch(`${sb.url}/rest/v1/products?id=eq.${encodeURIComponent(savedRow.id)}&select=*`, {
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`
+        },
+        signal: AbortSignal.timeout(4000)
+      });
+      const verifyData = verifyRes.ok ? await verifyRes.json() : null;
+      console.log('[WA PRODUCT VERIFY]', verifyData);
 
-      console.log(`[BackendStore SUCCESS] Created new product "${input.nama}" with stok ${input.stok}`);
+      if (!verifyData || !Array.isArray(verifyData) || verifyData.length === 0) {
+        console.error('[WA PRODUCT VERIFICATION FAILED] Product not found in database verification query');
+        return {
+          message: `❌ [POS Toko Sembako] Verifikasi database gagal untuk "${parsedData.name}".`,
+          updatedStock: 0,
+          isNew: true,
+          success: false
+        };
+      }
 
-      // Log webhook to Supabase
-      logWebhookToSupabaseBackend({
-        sender: input.sender || 'WhatsApp',
-        messageText: `PRODUK#${input.nama}#${newProd.kategori}#${hargaBeli}#${hargaJual}#${input.stok}`,
-        rawBody: input,
-        status: 'success',
-        actionTaken: `Produk baru "${input.nama}" ditambahkan ke Supabase Cloud (Stok: ${input.stok})`
+      // Record stock movement log in Supabase
+      fetch(`${sb.url}/rest/v1/stock_movements`, {
+        method: 'POST',
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([{
+          store_id: storeId,
+          produk_id: String(savedRow.id),
+          nama_produk: savedRow.nama,
+          kode_produk: savedRow.kode || sku,
+          tipe: 'masuk',
+          jumlah: parsedData.stock,
+          stok_awal: 0,
+          stok_akhir: parsedData.stock,
+          keterangan: `Produk baru diinput via WhatsApp (${rawSender})`,
+          operator: 'WhatsApp Bot',
+          created_at: now
+        }])
       }).catch(() => {});
+
+      // STEP 10: ONLY SEND SUCCESS AFTER STRICT VERIFICATION
+      const msg = `✅ [POS Toko Sembako] Produk baru "${parsedData.name}" BERHASIL DITAMBAHKAN!\n\n` +
+                  `📦 Stok Awal: ${parsedData.stock} ${parsedData.unit}\n` +
+                  `💰 Harga Jual: Rp ${parsedData.selling_price.toLocaleString('id-ID')}\n` +
+                  `🏷️ Kategori: ${parsedData.category}\n` +
+                  `🏬 Toko: ${storeName}`;
 
       return {
         message: msg,
-        updatedStock: input.stok,
-        isNew: true
+        updatedStock: parsedData.stock,
+        isNew: true,
+        success: true,
+        productId: savedRow.id
       };
     }
-
   } catch (err: any) {
-    console.error('Error in processProductWebhook:', err);
-    const satuanStr = input.satuan || 'Pcs';
+    console.error('[WA PRODUCT EXCEPTION]', err);
     return {
-      message: `✅ [POS Toko Sembako] Produk "${input.nama}" berhasil diproses dengan stok ${input.stok} ${satuanStr}!`,
-      updatedStock: input.stok,
-      isNew: false
+      message: `❌ [POS Toko Sembako] Produk gagal disimpan ke database. (${err?.message || 'Database error'})`,
+      updatedStock: 0,
+      isNew: false,
+      success: false
     };
   }
 }
 
 export async function processStockUpdateWebhook(nama: string, addedStock: number, sender?: string): Promise<string> {
-  try {
-    const res = await processProductWebhook({ nama, stok: addedStock, sender });
-    return res.message;
-  } catch (e: any) {
-    return `✅ [POS Toko Sembako] Perintah stok "${nama}" sebesar +${addedStock} berhasil diproses!`;
-  }
+  const res = await processProductWebhook({ nama, stok: addedStock, sender });
+  return res.message;
 }
