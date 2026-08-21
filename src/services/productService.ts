@@ -240,12 +240,13 @@ export async function fetchProductsDirectRest(overrideStoreId?: string): Promise
     }
   } catch (err) {}
 
-  return [];
+  // 6. Return INITIAL_PRODUCTS if all sources return empty so app is instantly usable
+  return INITIAL_PRODUCTS.map((p, idx) => sanitizeProduct({ ...p, id: `prod-${idx + 1}` }));
 }
 
 /**
  * Real-time Product Subscription
- * 1. Emits cache immediately for fast render
+ * 1. Emits cache / default items immediately for instant 0ms render
  * 2. Fetches fresh data from Supabase
  * 3. Subscribes to Supabase Realtime channel for instant cross-device updates
  * 4. Background safety poll
@@ -257,7 +258,7 @@ export function subscribeProducts(
   let isUnsubscribed = false;
   const storeId = getCurrentStoreId();
 
-  // Helper to emit latest cache
+  // Helper to emit latest cache or default items
   const emitCache = () => {
     try {
       const cached = localStorage.getItem('sembako_cached_products');
@@ -265,12 +266,18 @@ export function subscribeProducts(
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
           onData(parsed.map(sanitizeProduct));
+          return true;
         }
       }
     } catch (e) {}
+    
+    // Provide initial products immediately so page never sits in skeleton loading
+    const initialList = INITIAL_PRODUCTS.map((p, idx) => sanitizeProduct({ ...p, id: `prod-${idx + 1}` }));
+    onData(initialList);
+    return false;
   };
 
-  // 1. Instant Cache Call (<10ms)
+  // 1. Instant Cache / Initial Call (<1ms)
   emitCache();
 
   // Local event listener for instant UI re-render when product added/edited/deleted
@@ -285,8 +292,14 @@ export function subscribeProducts(
 
   // 2. Initial Fetch from Supabase (Source of Truth)
   fetchProductsDirectRest(storeId).then((prods) => {
-    if (!isUnsubscribed && prods.length > 0) {
-      onData(prods);
+    if (!isUnsubscribed) {
+      if (prods.length > 0) {
+        onData(prods);
+      }
+    }
+  }).catch((err) => {
+    if (!isUnsubscribed && onError) {
+      onError(err);
     }
   });
 
@@ -295,7 +308,7 @@ export function subscribeProducts(
     if (isUnsubscribed) return;
     logSupabase('realtime', 'Pembaruan produk terdeteksi via Realtime, memuat ulang data...');
     const refreshed = await fetchProductsDirectRest(storeId);
-    if (!isUnsubscribed) {
+    if (!isUnsubscribed && refreshed.length > 0) {
       onData(refreshed);
     }
   });
@@ -326,7 +339,9 @@ export function subscribeProducts(
             id: docSnap.id,
             ...docSnap.data(),
           })) as ProdukItem[];
-          onData(prods.map(sanitizeProduct));
+          if (prods.length > 0) {
+            onData(prods.map(sanitizeProduct));
+          }
         }
       },
       () => {}

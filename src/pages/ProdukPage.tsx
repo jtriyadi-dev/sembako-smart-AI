@@ -75,6 +75,11 @@ export const ProdukPage: React.FC = () => {
   // Subscribe to real-time products snapshot from Firestore
   useEffect(() => {
     setIsLoading(true);
+
+    const safetyTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 250);
+
     const unsubProducts = subscribeProducts(
       (data) => {
         setProducts(data);
@@ -89,6 +94,7 @@ export const ProdukPage: React.FC = () => {
     const unsubSuppliers = subscribeSuppliers((data) => setSuppliers(data));
 
     return () => {
+      clearTimeout(safetyTimer);
       unsubProducts();
       unsubSuppliers();
     };
