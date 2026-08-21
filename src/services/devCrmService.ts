@@ -630,14 +630,16 @@ export async function testWhatsAppGateway(config: { provider: string; token: str
   };
 }
 
-export async function testSupabaseGateway(config: { supabaseUrl: string; supabaseAnonKey: string }): Promise<{ success: boolean; message: string }> {
+export async function testSupabaseGateway(config: { supabaseUrl: string; supabaseAnonKey?: string; supabaseServiceRoleKey?: string }): Promise<{ success: boolean; message: string }> {
   const url = (config.supabaseUrl || '').trim();
-  const key = (config.supabaseAnonKey || '').trim();
+  const anonKey = (config.supabaseAnonKey || '').trim();
+  const serviceKey = (config.supabaseServiceRoleKey || '').trim();
+  const key = serviceKey && !serviceKey.includes('•') ? serviceKey : anonKey;
 
   if (!url || !key) {
     return {
       success: false,
-      message: 'URL Supabase dan Anon/Public Key wajib diisi.'
+      message: 'URL Supabase dan Key API wajib diisi.'
     };
   }
 
@@ -646,7 +648,12 @@ export async function testSupabaseGateway(config: { supabaseUrl: string; supabas
     const { ok, data } = await safeJsonFetch('/api/developer/test-supabase', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ supabaseUrl: url, supabaseKey: key }),
+      body: JSON.stringify({ 
+        supabaseUrl: url, 
+        supabaseKey: key,
+        supabaseAnonKey: anonKey,
+        supabaseServiceRoleKey: serviceKey && !serviceKey.includes('•') ? serviceKey : undefined
+      }),
       signal: AbortSignal.timeout(8000)
     });
 
@@ -658,7 +665,7 @@ export async function testSupabaseGateway(config: { supabaseUrl: string; supabas
   // 2. Client-side fallback test via supabaseClient
   try {
     const { testSupabaseConnection } = await import('./supabaseClient');
-    return await testSupabaseConnection(url, key);
+    return await testSupabaseConnection(url, anonKey || key);
   } catch (e: any) {
     return {
       success: false,

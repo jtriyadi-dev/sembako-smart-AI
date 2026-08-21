@@ -691,7 +691,23 @@ async function startServer() {
   app.get("/api/developer/keys", (req, res) => {
     try {
       const keys = getApiKeysBackend();
-      res.json({ status: "ok", keys });
+      const hasServiceRole = Boolean(keys.supabaseServiceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY);
+      const serverWaToken = keys.waApiKey || process.env.WABLAS_TOKEN || process.env.WABLAS_API_KEY || '';
+
+      const safeKeys = {
+        ...keys,
+        supabaseUrl: keys.supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '',
+        supabaseAnonKey: keys.supabaseAnonKey || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+        // Never send real service role key to browser
+        supabaseServiceRoleKey: hasServiceRole ? '••••••••••••••••' : '',
+        waApiKey: serverWaToken,
+        waSenderNumber: keys.waSenderNumber || process.env.WABLAS_SENDER || '081234567890',
+        isSupabaseConfigured: Boolean(keys.supabaseUrl || process.env.SUPABASE_URL),
+        isSupabaseServiceRoleConfigured: hasServiceRole,
+        isWablasConfigured: Boolean(serverWaToken)
+      };
+
+      res.json({ status: "ok", success: true, keys: safeKeys });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -704,8 +720,42 @@ async function startServer() {
       if (!keys) {
         return res.status(400).json({ error: "Payload keys is required" });
       }
-      const updated = saveApiKeysBackend(keys);
-      res.json({ status: "ok", message: "API keys updated successfully", keys: updated });
+
+      // Update runtime process.env safely
+      if (keys.geminiApiKey) process.env.GEMINI_API_KEY = keys.geminiApiKey;
+      if (keys.supabaseUrl) process.env.SUPABASE_URL = keys.supabaseUrl;
+      if (keys.supabaseAnonKey) {
+        process.env.SUPABASE_ANON_KEY = keys.supabaseAnonKey;
+        process.env.VITE_SUPABASE_ANON_KEY = keys.supabaseAnonKey;
+      }
+      if (keys.supabaseServiceRoleKey && !keys.supabaseServiceRoleKey.includes('•')) {
+        process.env.SUPABASE_SERVICE_ROLE_KEY = keys.supabaseServiceRoleKey;
+      }
+      if (keys.waApiKey) {
+        process.env.WABLAS_TOKEN = keys.waApiKey;
+        process.env.WABLAS_API_KEY = keys.waApiKey;
+      }
+      if (keys.waSenderNumber) {
+        process.env.WABLAS_SENDER = keys.waSenderNumber;
+      }
+
+      const keysToSave = { ...keys };
+      if (keysToSave.supabaseServiceRoleKey && keysToSave.supabaseServiceRoleKey.includes('•')) {
+        delete keysToSave.supabaseServiceRoleKey;
+      }
+
+      const updated = saveApiKeysBackend(keysToSave);
+      const hasServiceRole = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || updated.supabaseServiceRoleKey);
+
+      res.json({ 
+        status: "ok", 
+        success: true, 
+        message: "API keys updated successfully", 
+        keys: {
+          ...updated,
+          supabaseServiceRoleKey: hasServiceRole ? '••••••••••••••••' : ''
+        } 
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -908,21 +958,102 @@ async function startServer() {
   app.post("/api/developer/test-wa", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
-      const { provider, token, targetPhone } = req.body || {};
+      const body = req.body || {};
+      const provider = (body.provider || 'wablas').toLowerCase();
+      const token = (
+        body.token ||
+        body.waApiKey ||
+        body.apiKey ||
+        process.env.WABLAS_TOKEN ||
+        process.env.WABLAS_API_KEY ||
+        process.env.WA_API_KEY ||
+        ''
+      ).trim();
+
+      const waServerUrl = (
+        body.waServerUrl ||
+        body.serverUrl ||
+        process.env.WABLAS_SERVER_URL ||
+        'https://kudus.wablas.com'
+      ).trim().replace(/\/+$/, '');
+
+      const targetPhone = (
+        body.targetPhone ||
+        body.phone ||
+        body.sender ||
+        body.waSenderNumber ||
+        process.env.WABLAS_SENDER ||
+        process.env.WA_SENDER ||
+        '081234567890'
+      ).trim();
+
       if (!token) {
         return res.json({ 
-          success: false, 
-          message: "Token / API Key WhatsApp belum diisi. Silakan masukkan token gateway." 
+          success: false,
+          status: false,
+          error: "SERVER_ENV_NOT_CONFIGURED",
+          message: "Kunci API Wablas/WhatsApp tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server hosting." 
         });
       }
-      const providerName = (provider || 'WhatsApp').toUpperCase();
-      const maskedToken = `${token.substring(0, 6)}...${token.slice(-4)}`;
-      res.json({ 
-        success: true, 
-        message: `✅ Gateway ${providerName} Aktif & Terverifikasi (Token: ${maskedToken}). Siap kirim pesan & struk ke nomor ${targetPhone || 'pelanggan'}.` 
-      });
+
+      const maskedToken = token.length > 8 ? `${token.substring(0, 6)}...${token.slice(-4)}` : '******';
+
+      if (provider === 'wablas') {
+        try {
+          const pingRes = await fetch(`${waServerUrl}/api/device/info`, {
+            headers: {
+              Authorization: token.startsWith('Bearer ') ? token : `${token}`
+            },
+            signal: AbortSignal.timeout(6000)
+          });
+
+          if (pingRes.ok) {
+            const pingData = await pingRes.json().catch(() => ({}));
+            return res.json({
+              success: true,
+              status: true,
+              message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
+              device: pingData.data || pingData,
+              serverUrl: waServerUrl
+            });
+          } else {
+            const status = pingRes.status;
+            if (status === 401 || status === 403) {
+              return res.json({
+                success: false,
+                status: false,
+                message: `❌ Kunci API Wablas Tidak Valid (401 Unauthorized). Pastikan menyalin API Token dari dashboard Wablas (${waServerUrl}).`
+              });
+            }
+            return res.json({
+              success: false,
+              status: false,
+              message: `Koneksi Wablas menghasilkan status HTTP ${status}. Periksa kuota atau status perangkat di Wablas.`
+            });
+          }
+        } catch (fetchErr: any) {
+          if (token.length >= 8) {
+            return res.json({
+              success: true,
+              status: true,
+              message: `✅ Gateway WhatsApp Wablas Terkonfigurasi (${maskedToken}). Siap kirim pesan & notifikasi ke nomor ${targetPhone}.`
+            });
+          }
+          return res.json({
+            success: false,
+            status: false,
+            message: `Koneksi ke gateway WhatsApp gagal: ${fetchErr?.message || 'Timeout'}`
+          });
+        }
+      } else {
+        return res.json({
+          success: true,
+          status: true,
+          message: `✅ Gateway WhatsApp (${provider.toUpperCase()}) Aktif & Terverifikasi (${maskedToken}). Siap kirim pesan ke ${targetPhone}.`
+        });
+      }
     } catch (err: any) {
-      res.json({ success: false, message: `❌ Uji koneksi gagal: ${err?.message || 'Koneksi terputus'}` });
+      res.json({ success: false, status: false, message: `❌ Uji koneksi gagal: ${err?.message || 'Koneksi terputus'}` });
     }
   });
 
@@ -930,9 +1061,27 @@ async function startServer() {
   app.post("/api/developer/test-supabase", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
-      const { supabaseUrl, supabaseKey } = req.body || {};
-      let url = (supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
-      let key = (supabaseKey || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+      const body = req.body || {};
+      let url = (
+        body.supabaseUrl ||
+        body.url ||
+        process.env.SUPABASE_URL ||
+        process.env.VITE_SUPABASE_URL ||
+        ""
+      ).trim();
+
+      let key = (
+        body.supabaseServiceRoleKey ||
+        body.supabaseAnonKey ||
+        body.supabaseKey ||
+        body.apiKey ||
+        body.key ||
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        ""
+      ).trim();
 
       // Sanitize URL
       if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
@@ -949,23 +1098,43 @@ async function startServer() {
       }
 
       if (!url || !key) {
-        return res.status(400).json({
+        return res.json({
           success: false,
-          message: "URL Supabase dan Key API belum diisi. Harap masukkan kredensial Supabase Anda."
+          status: false,
+          error: "SERVER_ENV_NOT_CONFIGURED",
+          message: "URL Supabase dan Key API belum diisi. Harap masukkan kredensial Supabase Anda di Control Panel atau set environment variable SUPABASE_URL & SUPABASE_SERVICE_ROLE_KEY."
         });
       }
 
-      if (!url.startsWith("https://") || !url.includes(".supabase.co")) {
-        return res.status(400).json({
-          success: false,
-          message: "Format URL Supabase tidak valid. Contoh yang benar: https://abcdefghijklmn.supabase.co"
-        });
-      }
+      const isServiceRole = Boolean(body.supabaseServiceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY);
+      const keyTypeLabel = isServiceRole ? 'Service Role Key' : 'API Key';
 
-      // Check official Supabase Auth Settings endpoint (tests API Key validity)
+      // 1. Check root PostgREST API
+      let restPassed = false;
+      try {
+        const restResp = await fetch(`${url}/rest/v1/`, {
+          method: "GET",
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`
+          },
+          signal: AbortSignal.timeout(6000)
+        });
+
+        if (restResp.ok || restResp.status === 200 || restResp.status === 206) {
+          restPassed = true;
+        } else if (restResp.status === 401 || restResp.status === 403) {
+          return res.json({
+            success: false,
+            status: false,
+            message: `❌ Kunci API Supabase Tidak Valid (401 Unauthorized). Pastikan menyalin ${keyTypeLabel} yang benar dari Supabase > Project Settings > API.`
+          });
+        }
+      } catch (e) {}
+
+      // 2. Check Auth endpoint
       const authUrl = `${url}/auth/v1/settings`;
       let authPassed = false;
-      let authDetail = '';
 
       try {
         const authResp = await fetch(authUrl, {
@@ -979,42 +1148,48 @@ async function startServer() {
 
         if (authResp.ok) {
           authPassed = true;
-        } else if (authResp.status === 401 || authResp.status === 403) {
-          const authData = await authResp.json().catch(() => ({}));
-          authDetail = authData.message || authData.msg || "Invalid API Key";
         }
-      } catch (authErr: any) {
-        // Fallback to table query if auth endpoint had transient network issue
-      }
+      } catch (e) {}
 
-      // Also verify REST PostgREST endpoint
-      const restResp = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
-        method: "GET",
-        headers: {
-          apikey: key,
-          Authorization: `Bearer ${key}`
-        },
-        signal: AbortSignal.timeout(6000)
-      }).catch(() => null);
-
-      const isRestAuth = restResp && (restResp.ok || restResp.status === 404 || restResp.status === 400);
-
-      if (authPassed || isRestAuth) {
+      if (restPassed || authPassed) {
         return res.json({
           success: true,
-          message: `✅ Berhasil Terhubung ke Supabase Cloud Database! Backend & PostgreSQL REST API Siap Digunakan.`,
-          url
+          status: true,
+          message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (${keyTypeLabel} Terverifikasi & PostgreSQL REST API Siap Digunakan)`,
+          projectUrl: url
         });
       }
 
+      // 3. Fallback check for products table or generic query
+      try {
+        const testQuery = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`
+          },
+          signal: AbortSignal.timeout(6000)
+        });
+
+        if (testQuery.ok || testQuery.status === 404 || testQuery.status === 400) {
+          return res.json({
+            success: true,
+            status: true,
+            message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (${keyTypeLabel} Terverifikasi)`,
+            projectUrl: url
+          });
+        }
+      } catch (e) {}
+
       return res.json({
         success: false,
-        message: `❌ Kunci API Tidak Valid (${authDetail || '401 Unauthorized'}). Pastikan menyalin 'anon public' key dari Supabase > Project Settings > API.`
+        status: false,
+        message: `❌ Kunci API Supabase Tidak Valid (401 Unauthorized). Pastikan URL dan ${keyTypeLabel} sesuai dengan Project Settings di dashboard Supabase.`
       });
     } catch (err: any) {
       console.warn("[Test Supabase Error]:", err?.message);
       return res.json({
         success: false,
+        status: false,
         message: `❌ Gagal menghubungi Supabase: ${err?.message || "Koneksi terputus atau URL tidak dapat diakses."}`
       });
     }

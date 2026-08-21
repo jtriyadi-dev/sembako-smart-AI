@@ -401,6 +401,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       const res = await testSupabaseGateway({
         supabaseUrl: cleanUrl,
         supabaseAnonKey: cleanKey,
+        supabaseServiceRoleKey: (supabaseServiceRoleKeyInput || '').trim(),
       });
       setSupabaseTestResult(res);
       if (res.success) {

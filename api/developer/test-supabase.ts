@@ -28,72 +28,79 @@ export default async function handler(req: any, res: any) {
       body.url ||
       process.env.SUPABASE_URL ||
       process.env.VITE_SUPABASE_URL ||
-      'https://wwnvddrmwxkomkkbhfep.supabase.co'
+      ''
     ).trim().replace(/\/+$/, '');
 
-    const supabaseAnonKey = (
+    const supabaseKey = (
+      body.supabaseServiceRoleKey ||
       body.supabaseAnonKey ||
       body.apiKey ||
       body.key ||
+      body.supabaseKey ||
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_ANON_KEY ||
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
       process.env.VITE_SUPABASE_ANON_KEY ||
       ''
     ).trim().replace(/^bearer\s+/i, '');
 
-    if (!supabaseUrl) {
+    if (!supabaseUrl || !supabaseKey) {
       return res.status(200).json({
         success: false,
         status: false,
-        message: 'URL Supabase tidak boleh kosong.'
+        error: 'SERVER_ENV_NOT_CONFIGURED',
+        message: 'URL Supabase dan Key API belum diisi. Harap masukkan kredensial di Control Panel atau set environment variable SUPABASE_URL & SUPABASE_SERVICE_ROLE_KEY di server.'
       });
     }
 
-    // Ping PostgREST endpoint
+    const isServiceRole = Boolean(body.supabaseServiceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const keyTypeLabel = isServiceRole ? 'Service Role Key' : 'API Key';
+
+    // Ping Supabase PostgREST endpoint
     try {
-      const restRes = await fetch(`${supabaseUrl}/rest/v1/products?select=id&limit=1`, {
+      const restRes = await fetch(`${supabaseUrl}/rest/v1/`, {
         headers: {
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`
         },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(6000)
       });
 
       if (restRes.ok || restRes.status === 200 || restRes.status === 206) {
         return res.status(200).json({
           success: true,
           status: true,
-          message: '✅ Berhasil Terhubung ke Supabase Cloud Database! (PostgREST API Aktif)',
+          message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (${keyTypeLabel} Terverifikasi)`,
           projectUrl: supabaseUrl
         });
       } else if (restRes.status === 401 || restRes.status === 403) {
         return res.status(200).json({
           success: false,
           status: false,
-          message: '❌ Kunci API Supabase Tidak Valid (401 Unauthorized).'
+          message: '❌ Kunci API Supabase Tidak Valid (401 Unauthorized). Pastikan URL dan Key sesuai dengan Project Settings di dashboard Supabase.'
         });
       } else {
-        // Table might not exist yet but connection authenticated
+        // Test query on table or root
         const errText = await restRes.text().catch(() => '');
-        if (errText.includes('42P01') || errText.includes('does not exist')) {
+        if (restRes.status === 404 || errText.includes('42P01') || errText.includes('does not exist')) {
           return res.status(200).json({
             success: true,
             status: true,
-            message: '✅ Berhasil Terhubung ke Supabase Cloud Database! (Tabel belum dibuat)',
+            message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (${keyTypeLabel} Aktif)`,
             projectUrl: supabaseUrl
           });
         }
         return res.status(200).json({
           success: false,
           status: false,
-          message: `Supabase mengembalikan status ${restRes.status}: ${errText}`
+          message: `Supabase mengembalikan status HTTP ${restRes.status}: ${errText}`
         });
       }
     } catch (fetchErr: any) {
       return res.status(200).json({
         success: false,
         status: false,
-        message: `Koneksi ke Supabase gagal: ${fetchErr?.message || 'Timeout'}`
+        message: `Koneksi ke Supabase gagal: ${fetchErr?.message || 'Timeout / Network Error'}`
       });
     }
   } catch (err: any) {
