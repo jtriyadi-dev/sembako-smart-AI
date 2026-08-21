@@ -1,17 +1,4 @@
-import { 
-  db, 
-  COLLECTIONS, 
-  collection, 
-  doc, 
-  addDoc, 
-  setDoc, 
-  getDoc, 
-  query, 
-  auth 
-} from './firebase';
-import { onSnapshot } from 'firebase/firestore';
 import { TransaksiItem, TransaksiDetailItem, RiwayatReturItem } from '../types';
-import { handleFirestoreError, OperationType } from './productService';
 import { 
   getSupabaseClient, 
   getCurrentStoreId, 
@@ -148,57 +135,10 @@ export function subscribeTransactions(
     } catch (e) {}
   }, 3500);
 
-  // 5. Firestore fallback listener
-  let unsubscribeFirestore = () => {};
-  try {
-    const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
-    const q = query(txRef);
-    unsubscribeFirestore = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
-        if (!getSupabaseClient()) {
-          const txs: TransaksiItem[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              storeId,
-              kodeTransaksi: data.kodeTransaksi || `TRX-${docSnap.id.substring(0, 6).toUpperCase()}`,
-              tanggal: data.tanggal || new Date().toISOString(),
-              items: Array.isArray(data.items) ? data.items : [],
-              subtotal: Number(data.subtotal) || 0,
-              diskonTotal: Number(data.diskonTotal) || 0,
-              pajakPersen: Number(data.pajakPersen) || 0,
-              pajakNominal: Number(data.pajakNominal) || 0,
-              totalHarga: Number(data.totalHarga) || 0,
-              totalRefund: Number(data.totalRefund) || 0,
-              bayar: Number(data.bayar) || 0,
-              kembalian: Number(data.kembalian) || 0,
-              metodePembayaran: data.metodePembayaran || 'tunai',
-              statusPembayaran: data.statusPembayaran || 'lunas',
-              bankNama: data.bankNama || '',
-              noReferensi: data.noReferensi || '',
-              namaPelanggan: data.namaPelanggan || 'Pelanggan Umum',
-              kasirName: data.kasirName || 'Kasir Toko',
-              catatan: data.catatan || '',
-              alasanRetur: data.alasanRetur || '',
-              returAt: data.returAt || '',
-              riwayatRetur: Array.isArray(data.riwayatRetur) ? data.riwayatRetur : [],
-              createdAt: data.createdAt || new Date().toISOString(),
-            };
-          });
-          onData(txs);
-        }
-      },
-      () => {}
-    );
-  } catch (e) {}
-
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
     try { unsubscribeRealtime(); } catch (_) {}
-    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
@@ -302,24 +242,6 @@ export async function returTransaction(
       logSupabase('error', 'Exception returTransaction Supabase:', e);
     }
   }
-
-  // 2. Firestore Update
-  try {
-    const txRef = doc(db, COLLECTIONS.TRANSACTIONS, transaction.id);
-    await setDoc(
-      txRef,
-      {
-        items: updatedItems,
-        statusPembayaran: 'retur',
-        alasanRetur: alasan,
-        returAt: now,
-        totalRefund: transaction.totalHarga,
-        riwayatRetur: updatedRiwayat,
-        updatedAt: now,
-      },
-      { merge: true }
-    );
-  } catch (error) {}
 }
 
 export interface ItemReturRequest {
@@ -452,24 +374,6 @@ export async function returItemsTransaction(
       logSupabase('error', 'Exception returItems Supabase:', e);
     }
   }
-
-  // 2. Firestore Update
-  try {
-    const txRef = doc(db, COLLECTIONS.TRANSACTIONS, transaction.id);
-    await setDoc(
-      txRef,
-      {
-        items: updatedItems,
-        statusPembayaran: nextStatus,
-        totalRefund: grandTotalRefund,
-        riwayatRetur: updatedRiwayat,
-        alasanRetur: cleanReason,
-        returAt: now,
-        updatedAt: now,
-      },
-      { merge: true }
-    );
-  } catch (error) {}
 }
 
 export async function returItemTransaction(
@@ -612,13 +516,7 @@ export async function createTransaction(txData: Omit<TransaksiItem, 'id'>): Prom
     }
   }
 
-  // 2. Firestore Add (Secondary Backup)
-  try {
-    const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
-    await addDoc(txRef, finalData);
-  } catch (error) {}
-
-  // 3. Optimistic Cache Update
+  // 2. Optimistic Cache Update
   try {
     const cached = localStorage.getItem(CACHE_TX_KEY);
     const list = cached ? JSON.parse(cached) : [];

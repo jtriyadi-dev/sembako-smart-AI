@@ -255,6 +255,29 @@ export default async function handler(req: any, res: any) {
     // Identify Store ID
     const { storeId, storeName } = resolveStoreInfo(sender);
 
+    console.log('[WABLAS RECEIVED]', new Date().toISOString());
+    console.log('[WABLAS RAW BODY]', typeof body === 'object' ? JSON.stringify(body) : body);
+    console.log('[WABLAS SENDER]', sender);
+    console.log('[WABLAS MESSAGE]', messageText);
+    console.log('[STORE FOUND]', { storeId, storeName });
+
+    // Helper to persist webhook log to Supabase
+    const recordWebhookLog = async (status: 'success' | 'error' | 'ignored', actionTaken: string) => {
+      try {
+        if (supabase) {
+          await supabase.from('webhook_logs').insert([{
+            store_id: storeId,
+            sender: sender,
+            message_text: messageText,
+            raw_body: typeof body === 'object' ? JSON.stringify(body) : String(body),
+            status: status,
+            action_taken: actionTaken,
+            created_at: new Date().toISOString()
+          }]);
+        }
+      } catch (_) {}
+    };
+
     // =========================================================================
     // FLOW A: PRODUK# (TAMBAH / INSERT PRODUK BARU KE SUPABASE)
     // =========================================================================
@@ -268,12 +291,10 @@ export default async function handler(req: any, res: any) {
     if (isProductCmd) {
       const parsed = parseProductMessage(messageText);
 
-      // STEP 2: LOG SELURUH FLOW
-      console.log('[WA PRODUCT] RAW MESSAGE:', messageText);
-      console.log('[WA PRODUCT] PARSED:', parsed);
-      console.log('[WA PRODUCT] STORE ID:', storeId);
+      console.log('[PRODUCT PARSED]', parsed);
 
       if (!parsed || !parsed.name) {
+        await recordWebhookLog('error', 'Format pesan produk tidak valid');
         return res.status(200).json({
           status: false,
           message: 'Format pesan produk tidak valid. Contoh: PRODUK#Tepung Segitiga Biru 1kg#Bumbu & Tepung#11000#13000#25#Kg#5',
@@ -307,7 +328,7 @@ export default async function handler(req: any, res: any) {
         if (parsed.category) updatePayload.kategori = parsed.category;
         if (parsed.unit) updatePayload.satuan = parsed.unit;
 
-        console.log('[WA PRODUCT] UPDATE PAYLOAD:', updatePayload);
+        console.log('[SUPABASE INSERT PAYLOAD]', updatePayload);
 
         const { data: updateData, error: updateError } = await supabase
           .from('products')
@@ -316,16 +337,11 @@ export default async function handler(req: any, res: any) {
           .select()
           .single();
 
-        console.log('[WA PRODUCT] SUPABASE DATA:', updateData);
-        console.log('[WA PRODUCT] SUPABASE ERROR:', updateError);
+        console.log('[SUPABASE INSERT DATA]', updateData);
+        console.log('[SUPABASE INSERT ERROR]', updateError);
 
         if (updateError || !updateData) {
-          console.error('[WA PRODUCT UPDATE FAILED]', {
-            message: updateError?.message,
-            code: updateError?.code,
-            details: updateError?.details,
-            hint: updateError?.hint
-          });
+          await recordWebhookLog('error', `Gagal update produk: ${updateError?.message}`);
           return res.status(200).json({
             status: false,
             message: 'Produk gagal diperbarui di database.',
@@ -342,9 +358,10 @@ export default async function handler(req: any, res: any) {
           .eq('id', updateData.id)
           .single();
 
-        console.log('[WA PRODUCT VERIFY]', verifyData);
+        console.log('[PRODUCT VERIFIED]', verifyData);
 
         if (verifyError || !verifyData) {
+          await recordWebhookLog('error', `Verifikasi update gagal untuk ${parsed.name}`);
           return res.status(200).json({
             status: false,
             message: 'Verifikasi produk di database gagal setelah update.',
@@ -369,6 +386,9 @@ export default async function handler(req: any, res: any) {
             created_at: now
           }]);
         } catch (_) {}
+
+        const actionText = `Stok "${parsed.name}" diperbarui: ${oldStock} -> ${newStock} (${storeName})`;
+        await recordWebhookLog('success', actionText);
 
         const replyMsg = `✅ [POS Toko Sembako] Produk "${parsed.name}" BERHASIL DIPERBARUI!\n\n` +
                          `📦 Stok Awal: ${oldStock} ${parsed.unit}\n` +
@@ -405,7 +425,7 @@ export default async function handler(req: any, res: any) {
           updated_at: now
         };
 
-        console.log('[WA PRODUCT] INSERT PAYLOAD:', payload);
+        console.log('[SUPABASE INSERT PAYLOAD]', payload);
 
         // STEP 3: INSERT Supabase
         const { data, error } = await supabase
@@ -414,17 +434,11 @@ export default async function handler(req: any, res: any) {
           .select()
           .single();
 
-        console.log('[WA PRODUCT] SUPABASE DATA:', data);
-        console.log('[WA PRODUCT] SUPABASE ERROR:', error);
+        console.log('[SUPABASE INSERT DATA]', data);
+        console.log('[SUPABASE INSERT ERROR]', error);
 
         if (error || !data) {
-          console.error('[WA PRODUCT INSERT FAILED]', {
-            message: error?.message,
-            code: error?.code,
-            details: error?.details,
-            hint: error?.hint
-          });
-
+          await recordWebhookLog('error', `Gagal insert produk baru: ${error?.message}`);
           return res.status(200).json({
             status: false,
             message: 'Produk gagal disimpan ke database.',
@@ -441,10 +455,10 @@ export default async function handler(req: any, res: any) {
           .eq('id', data.id)
           .single();
 
-        console.log('[WA PRODUCT VERIFY]', verifyData);
+        console.log('[PRODUCT VERIFIED]', verifyData);
 
         if (verifyError || !verifyData) {
-          console.error('[WA PRODUCT VERIFICATION FAILED]', verifyError);
+          await recordWebhookLog('error', `Verifikasi insert gagal untuk ${parsed.name}`);
           return res.status(200).json({
             status: false,
             message: 'Verifikasi produk di database gagal.',
@@ -470,6 +484,9 @@ export default async function handler(req: any, res: any) {
             created_at: now
           }]);
         } catch (_) {}
+
+        const actionText = `Produk baru "${parsed.name}" berhasil ditambahkan: Stok ${parsed.stock} ${parsed.unit} (${storeName})`;
+        await recordWebhookLog('success', actionText);
 
         // STEP 10: RESPONSE YANG BENAR - ONLY AFTER STRICT DATABASE INSERT & VERIFICATION SUCCESS
         const replyMsg = `✅ [POS Toko Sembako] Produk baru "${parsed.name}" BERHASIL DITAMBAHKAN!\n\n` +

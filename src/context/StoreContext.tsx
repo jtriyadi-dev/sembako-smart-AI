@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { isValidLicenseKey } from '../constants/officialLicenseKeys';
-import { db, doc, getDoc, setDoc, COLLECTIONS, auth } from '../services/firebase';
 import { clearAllDatabaseData } from '../services/productService';
 
 export function getOrCreateInstallationId(): string {
@@ -118,28 +117,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return DEFAULT_LICENSE;
   });
 
-  // Background verification of cloud device locking
-  useEffect(() => {
-    if (licenseInfo.isActivated && licenseInfo.licenseKey) {
-      const currentInstId = getOrCreateInstallationId();
-      const licenseDocRef = doc(db, COLLECTIONS.ACTIVATED_LICENSES, licenseInfo.licenseKey);
-
-      getDoc(licenseDocRef)
-        .then((snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            if (data.installationId && data.installationId !== currentInstId) {
-              console.warn('License key locked to another device on Cloud!');
-              deactivateLicense();
-            }
-          }
-        })
-        .catch((err) => {
-          console.warn('Background license verification skipped:', err);
-        });
-    }
-  }, []);
-
   // Save to localStorage
   const updateStoreConfig = (newCfg: Partial<StoreConfig>) => {
     setStoreConfig((prev) => {
@@ -166,32 +143,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     const installationId = getOrCreateInstallationId();
-
-    // Async Cloud Lock in Firestore with timeout (Does not block UI activation)
-    try {
-      const user = auth.currentUser;
-      const licenseDocRef = doc(db, COLLECTIONS.ACTIVATED_LICENSES, trimmed);
-      
-      const firestorePromise = setDoc(licenseDocRef, {
-        licenseKey: trimmed,
-        installationId: installationId,
-        licenseeName: licensee || 'Pemilik Toko Registered',
-        lastActivatedAt: new Date().toISOString(),
-        activatedAtFormatted: new Date().toLocaleDateString('id-ID'),
-        status: 'ACTIVE_LOCKED',
-        activatedByEmail: user?.email || 'authenticated-user',
-        activatedByUid: user?.uid || 'user-uid',
-        deviceUserAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-      }, { merge: true });
-
-      // Max 800ms wait for cloud ping so it never hangs
-      await Promise.race([
-        firestorePromise,
-        new Promise((resolve) => setTimeout(resolve, 800))
-      ]);
-    } catch (err: any) {
-      console.warn('Firestore Cloud Lock Check skipped:', err);
-    }
 
     let type: 'PRO_LIFETIME' | 'ENTERPRISE' | 'TRIAL' = 'PRO_LIFETIME';
     let expiry = 'Permanen / Lifetime';

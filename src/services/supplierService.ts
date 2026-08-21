@@ -1,19 +1,5 @@
-import { 
-  db, 
-  COLLECTIONS, 
-  collection, 
-  doc, 
-  getDocs, 
-  setDoc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query 
-} from './firebase';
-import { onSnapshot } from 'firebase/firestore';
 import { SupplierItem } from '../types';
 import { INITIAL_SUPPLIERS } from '../data/initialSuppliers';
-import { handleFirestoreError, OperationType } from './productService';
 import { 
   getSupabaseClient, 
   getCurrentStoreId, 
@@ -134,47 +120,10 @@ export function subscribeSuppliers(
     }
   }, 3500);
 
-  // 5. Firestore fallback listener
-  let unsubscribeFirestore = () => {};
-  try {
-    const suppliersRef = collection(db, COLLECTIONS.SUPPLIERS);
-    const q = query(suppliersRef);
-    unsubscribeFirestore = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
-        if (!getSupabaseClient()) {
-          const suppliers: SupplierItem[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              storeId,
-              kodeSupplier: data.kodeSupplier || `SUP-${docSnap.id.substring(0, 4).toUpperCase()}`,
-              namaSupplier: data.namaSupplier || 'Supplier Sembako',
-              kontakPerson: data.kontakPerson || '',
-              telepon: data.telepon || '',
-              email: data.email || '',
-              alamat: data.alamat || '',
-              kategoriProduk: data.kategoriProduk || 'Umum',
-              catatan: data.catatan || '',
-              status: (data.status as 'aktif' | 'nonaktif') || 'aktif',
-              createdAt: data.createdAt || new Date().toISOString(),
-              updatedAt: data.updatedAt || new Date().toISOString(),
-            };
-          });
-          suppliers.sort((a, b) => a.kodeSupplier.localeCompare(b.kodeSupplier));
-          onData(suppliers);
-        }
-      },
-      () => {}
-    );
-  } catch (e) {}
-
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
     try { unsubscribeRealtime(); } catch (_) {}
-    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
@@ -219,13 +168,7 @@ export async function addSupplier(supplier: Omit<SupplierItem, 'id'>): Promise<s
     }
   }
 
-  // 2. Firestore insert
-  try {
-    const suppliersRef = collection(db, COLLECTIONS.SUPPLIERS);
-    await addDoc(suppliersRef, cleanData);
-  } catch (error) {}
-
-  // 3. Cache update
+  // 2. Cache update
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     const list = cached ? JSON.parse(cached) : [];
@@ -272,13 +215,7 @@ export async function updateSupplier(id: string, supplier: Partial<SupplierItem>
     }
   }
 
-  // 2. Firestore update
-  try {
-    const supplierRef = doc(db, COLLECTIONS.SUPPLIERS, id);
-    await setDoc(supplierRef, { ...supplier, updatedAt: now }, { merge: true });
-  } catch (error) {}
-
-  // 3. Cache update
+  // 2. Cache update
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
@@ -302,11 +239,6 @@ export async function deleteSupplier(id: string): Promise<void> {
       logSupabase('error', 'Exception deleteSupplier Supabase:', e);
     }
   }
-
-  try {
-    const supplierRef = doc(db, COLLECTIONS.SUPPLIERS, id);
-    await deleteDoc(supplierRef);
-  } catch (error) {}
 
   try {
     const cached = localStorage.getItem(CACHE_KEY);

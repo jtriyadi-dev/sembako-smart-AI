@@ -1,16 +1,4 @@
-import { 
-  db, 
-  COLLECTIONS, 
-  collection, 
-  doc, 
-  addDoc, 
-  setDoc, 
-  getDoc, 
-  query 
-} from './firebase';
-import { onSnapshot } from 'firebase/firestore';
 import { StockMovement, StockOpname, MovementType, ProdukItem } from '../types';
-import { handleFirestoreError, OperationType } from './productService';
 import { 
   getSupabaseClient, 
   getCurrentStoreId, 
@@ -179,49 +167,10 @@ export function subscribeStockMovements(
     } catch (e) {}
   }, 3500);
 
-  // 5. Firestore listener
-  let unsubscribeFirestore = () => {};
-  try {
-    const movementsRef = collection(db, COLLECTIONS.STOCK_MOVEMENTS);
-    const q = query(movementsRef);
-    unsubscribeFirestore = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
-        if (!getSupabaseClient()) {
-          const movements: StockMovement[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              storeId,
-              produkId: data.produkId || '',
-              namaProduk: data.namaProduk || 'Produk Sembako',
-              kodeProduk: data.kodeProduk || '',
-              tipe: (data.tipe as MovementType) || 'masuk',
-              jumlah: Number(data.jumlah) || 0,
-              stokAwal: Number(data.stokAwal) || 0,
-              stokAkhir: Number(data.stokAkhir) || 0,
-              keterangan: data.keterangan || '',
-              supplier: data.supplier || '',
-              expiredDate: data.expiredDate || '',
-              batchNo: data.batchNo || '',
-              createdAt: data.createdAt || new Date().toISOString(),
-              operator: data.operator || 'Admin',
-            };
-          });
-          movements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          onData(movements);
-        }
-      },
-      () => {}
-    );
-  } catch (e) {}
-
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
     try { unsubscribeRealtime(); } catch (_) {}
-    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
@@ -317,35 +266,6 @@ export async function recordStockMovement(params: {
     });
     localStorage.setItem(CACHE_MOVEMENTS_KEY, JSON.stringify(list));
   } catch (e) {}
-
-  // 3. Firestore sync
-  try {
-    const movementsRef = collection(db, COLLECTIONS.STOCK_MOVEMENTS);
-    await addDoc(movementsRef, {
-      storeId,
-      produkId: product.id,
-      namaProduk: product.nama,
-      kodeProduk: product.kode,
-      tipe,
-      jumlah: qtyDelta,
-      stokAwal,
-      stokAkhir,
-      keterangan: keterangan.trim() || `Transaksi stok ${tipe}`,
-      supplier: supplier?.trim() || '',
-      expiredDate: expiredDate?.trim() || '',
-      batchNo: batchNo?.trim() || '',
-      createdAt: now,
-      operator: operator || 'Admin Toko',
-    });
-
-    const productRef = doc(db, COLLECTIONS.PRODUCTS, product.id);
-    await setDoc(productRef, {
-      stok: stokAkhir,
-      updatedAt: now,
-      ...(expiredDate?.trim() ? { expiredDate: expiredDate.trim() } : {}),
-      ...(batchNo?.trim() ? { batchNo: batchNo.trim() } : {}),
-    }, { merge: true });
-  } catch (err) {}
 
   return id;
 }

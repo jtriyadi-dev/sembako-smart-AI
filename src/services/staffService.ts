@@ -1,16 +1,3 @@
-import { 
-  db, 
-  COLLECTIONS, 
-  collection, 
-  doc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  orderBy 
-} from './firebase';
-import { onSnapshot } from 'firebase/firestore';
 import { StaffAccount } from '../types';
 import { 
   getSupabaseClient, 
@@ -153,33 +140,10 @@ export function subscribeStaffAccounts(callback: (accounts: StaffAccount[]) => v
     }
   }, 4000);
 
-  // Firestore backup listener
-  let unsubscribeFirestore = () => {};
-  try {
-    const q = query(collection(db, COLLECTIONS.STAFF_ACCOUNTS), orderBy('createdAt', 'desc'));
-    unsubscribeFirestore = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
-        if (!getSupabaseClient()) {
-          const accounts: StaffAccount[] = snapshot.docs.map((docSnap) => ({
-            id: docSnap.id,
-            storeId,
-            ...(docSnap.data() as Omit<StaffAccount, 'id'>)
-          }));
-          saveLocalStaffAccounts(accounts);
-          callback(accounts);
-        }
-      },
-      () => {}
-    );
-  } catch (e) {}
-
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
     try { unsubscribeRealtime(); } catch (_) {}
-    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
@@ -214,14 +178,6 @@ export async function seedInitialStaffAccounts(): Promise<StaffAccount[]> {
       }
     } catch (e) {}
   }
-
-  try {
-    for (const staff of INITIAL_STAFF_ACCOUNTS) {
-      const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, staff.id);
-      const { id, ...data } = staff;
-      await setDoc(docRef, data, { merge: true });
-    }
-  } catch (e) {}
 
   return localData;
 }
@@ -271,13 +227,6 @@ export async function addStaffAccount(staff: Omit<StaffAccount, 'id' | 'createdA
       logSupabase('error', 'Exception addStaffAccount Supabase:', e);
     }
   }
-
-  // 2. Firestore
-  try {
-    const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, newAccount.id);
-    const { id, ...data } = newAccount;
-    await setDoc(docRef, data);
-  } catch (e) {}
 
   return newAccount.id;
 }
@@ -340,14 +289,6 @@ export async function updateStaffAccount(id: string, updates: Partial<StaffAccou
       logSupabase('error', 'Exception updateStaffAccount Supabase:', e);
     }
   }
-
-  // 2. Firestore
-  try {
-    const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
-    const { id: _, ...dataToSave } = updates as any;
-    dataToSave.updatedAt = new Date().toISOString();
-    await updateDoc(docRef, dataToSave);
-  } catch (e) {}
 }
 
 export async function deleteStaffAccount(id: string): Promise<void> {
@@ -362,11 +303,6 @@ export async function deleteStaffAccount(id: string): Promise<void> {
       logSupabase('sync', `Akun staf ${id} dihapus dari Supabase`);
     } catch (e) {}
   }
-
-  try {
-    const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
-    await deleteDoc(docRef);
-  } catch (e) {}
 }
 
 export async function findStaffByCredentials(identifier: string, password: string): Promise<StaffAccount | null> {
@@ -427,9 +363,4 @@ export async function updateStaffLastLogin(id: string): Promise<void> {
       await supabase.from('staff_accounts').update({ last_login: now }).eq('id', id);
     } catch (e) {}
   }
-
-  try {
-    const docRef = doc(db, COLLECTIONS.STAFF_ACCOUNTS, id);
-    await updateDoc(docRef, { lastLogin: now });
-  } catch (e) {}
 }

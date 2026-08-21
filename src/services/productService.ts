@@ -1,18 +1,3 @@
-import { 
-  db, 
-  COLLECTIONS, 
-  collection, 
-  doc, 
-  getDocs, 
-  setDoc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  orderBy,
-  auth
-} from './firebase';
-import { onSnapshot } from 'firebase/firestore';
 import { ProdukItem } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
 import { 
@@ -45,17 +30,7 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn(`[Database Error] Operation ${operationType} on ${path}:`, error);
 }
 
 // Helper to ensure every product object has non-null/non-undefined required properties
@@ -303,30 +278,6 @@ export function subscribeProducts(
     } catch (e) {}
   }, 4000);
 
-  // 5. Firestore Fallback Listener
-  let unsubscribeFirestore = () => {};
-  try {
-    const productsRef = collection(db, COLLECTIONS.PRODUCTS);
-    const q = query(productsRef);
-    unsubscribeFirestore = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isUnsubscribed || snapshot.empty) return;
-        // Only if not connected to Supabase
-        if (!getSupabaseClient()) {
-          const prods = snapshot.docs.map((docSnap) => ({
-            id: docSnap.id,
-            ...docSnap.data(),
-          })) as ProdukItem[];
-          if (prods.length > 0) {
-            onData(prods.map(sanitizeProduct));
-          }
-        }
-      },
-      () => {}
-    );
-  } catch (e) {}
-
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
@@ -334,7 +285,6 @@ export function subscribeProducts(
       window.removeEventListener('sembako_products_updated', handleLocalUpdate);
     }
     try { unsubscribeRealtime(); } catch (_) {}
-    try { unsubscribeFirestore(); } catch (_) {}
   };
 }
 
@@ -380,14 +330,6 @@ export async function seedSampleProducts(): Promise<void> {
       logSupabase('error', 'Exception seed produk Supabase:', e);
     }
   }
-
-  // Also seed to Firestore
-  try {
-    const productsRef = collection(db, COLLECTIONS.PRODUCTS);
-    for (const item of INITIAL_PRODUCTS) {
-      await addDoc(productsRef, item);
-    }
-  } catch (error) {}
 }
 
 /**
@@ -544,12 +486,6 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     }
   } catch (_) {}
 
-  // 8. Background secondary replica sync (Firestore & Express if active)
-  try {
-    const productDocRef = doc(db, COLLECTIONS.PRODUCTS, insertedId);
-    setDoc(productDocRef, savedItem, { merge: true }).catch(() => {});
-  } catch (_) {}
-
   return insertedId;
 }
 
@@ -626,13 +562,6 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
       }
     }
   } catch (_) {}
-
-  // Background Firestore replica update
-  try {
-    const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-    const updateData = { ...product, updatedAt: now };
-    setDoc(productRef, updateData, { merge: true }).catch(() => {});
-  } catch (_) {}
 }
 
 /**
@@ -675,12 +604,6 @@ export async function deleteProduct(id: string): Promise<void> {
       }
     }
   } catch (_) {}
-
-  // Background Firestore replica delete
-  try {
-    const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-    deleteDoc(productRef).catch(() => {});
-  } catch (_) {}
 }
 
 /**
@@ -704,20 +627,6 @@ export async function clearAllDatabaseData(): Promise<void> {
       logSupabase('sync', `Database data untuk store "${storeId}" berhasil di-reset.`);
     } catch (e) {}
   }
-
-  try {
-    const txRef = collection(db, COLLECTIONS.TRANSACTIONS);
-    const txSnap = await getDocs(txRef);
-    for (const d of txSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-
-    const prodRef = collection(db, COLLECTIONS.PRODUCTS);
-    const prodSnap = await getDocs(prodRef);
-    for (const d of prodSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-  } catch (e) {}
 
   try {
     localStorage.removeItem('sembako_cached_products');
