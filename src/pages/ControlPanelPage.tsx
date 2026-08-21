@@ -355,11 +355,22 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const handleTestWa = async () => {
     setTestingWa(true);
     setWaTestResult(null);
+
+    let cleanToken = (waApiKeyInput || '').trim();
+    if ((cleanToken.startsWith('"') && cleanToken.endsWith('"')) || (cleanToken.startsWith("'") && cleanToken.endsWith("'"))) {
+      cleanToken = cleanToken.slice(1, -1).trim();
+    }
+    if (cleanToken.toLowerCase().startsWith('bearer ')) {
+      cleanToken = cleanToken.slice(7).trim();
+    }
+    setWaApiKeyInput(cleanToken);
+
     try {
       const res = await testWhatsAppGateway({
         provider: waProviderInput,
-        token: waApiKeyInput,
-        targetPhone: waSenderInput || '081234567890',
+        token: cleanToken,
+        targetPhone: (waSenderInput || '081234567890').trim(),
+        waServerUrl: (apiKeys.waServerUrl || 'https://kudus.wablas.com').trim(),
       });
       setWaTestResult(res);
       if (res.success) {
@@ -2147,7 +2158,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                     type={showSupabaseKey ? 'text' : 'password'}
                     value={supabaseAnonKeyInput}
                     onChange={(e) => setSupabaseAnonKeyInput(e.target.value)}
-                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    placeholder="sb_publishable_... atau eyJhbGciOi..."
                     className="w-full pr-10 pl-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
                   />
                   <button
@@ -2159,7 +2170,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  🔑 Salin dari: <strong>Project Settings &gt; API &gt; API Keys &gt; anon public</strong> (diawali <code>eyJ...</code>).
+                  🔑 Salin dari: <strong>Project Settings &gt; API &gt; API Keys &gt; anon public</strong> (Mendukung <code>sb_publishable_...</code> atau <code>eyJ...</code>).
                 </p>
               </div>
 

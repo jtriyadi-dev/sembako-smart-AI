@@ -31,18 +31,36 @@ export default async function handler(req: any, res: any) {
     const provider = (body.provider || 'wablas').toLowerCase();
     
     // 1. Audit sumber nilai Token (Prioritas: Payload Control Panel -> Env Server)
-    const token = (
+    let rawToken = (
       body.token ||
       body.waApiKey ||
       body.apiKey ||
-      process.env.WABLAS_TOKEN ||
-      process.env.WABLAS_API_KEY ||
-      process.env.WA_API_KEY ||
       ''
     ).trim();
 
+    // Abaikan jika token adalah placeholder masked
+    if (rawToken.includes('•') || rawToken === '---' || rawToken === '******') {
+      rawToken = '';
+    }
+
+    if (!rawToken) {
+      rawToken = (
+        process.env.WABLAS_TOKEN ||
+        process.env.WABLAS_API_KEY ||
+        process.env.WA_API_KEY ||
+        ''
+      ).trim();
+    }
+
+    // Sanitasi token: hilangkan tanda petik, awalan 'Bearer ', spasi liar, newline
+    let cleanToken = rawToken
+      .replace(/^["']|["']$/g, '')
+      .replace(/^bearer\s+/i, '')
+      .replace(/[\r\n\t\s]/g, '')
+      .trim();
+
     // 2. Audit sumber nilai Server URL
-    const waServerUrl = (
+    let waServerUrl = (
       body.waServerUrl ||
       body.serverUrl ||
       process.env.WABLAS_SERVER_URL ||
@@ -60,24 +78,28 @@ export default async function handler(req: any, res: any) {
       '081234567890'
     ).trim();
 
-    // Log konfigurasi secara aman tanpa mengekspos token
+    // Log konfigurasi aman (hanya panjang, prefix, suffix)
     console.log('[WA TEST CONFIG]', {
       provider,
-      tokenConfigured: !!token,
-      senderConfigured: !!sender,
+      tokenConfigured: !!cleanToken,
+      tokenLength: cleanToken.length,
+      tokenPrefix: cleanToken.length > 4 ? cleanToken.slice(0, 4) : '***',
+      tokenSuffix: cleanToken.length > 4 ? cleanToken.slice(-4) : '***',
       serverUrl: waServerUrl
     });
 
-    if (!token) {
+    if (!cleanToken) {
       return res.status(200).json({
         success: false,
         status: 400,
         source: 'INTERNAL_API',
-        message: 'Kunci API / Token Wablas tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server.'
+        message: 'Kunci API / Token WhatsApp tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server.'
       });
     }
 
-    const maskedToken = token.length > 8 ? `${token.substring(0, 6)}...${token.slice(-4)}` : '******';
+    const maskedToken = cleanToken.length > 8
+      ? `${cleanToken.substring(0, 4)}...${cleanToken.slice(-4)}`
+      : '******';
 
     if (provider === 'wablas') {
       const waEndpoint = `${waServerUrl}/api/device/info`;
@@ -85,7 +107,9 @@ export default async function handler(req: any, res: any) {
 
       console.log('[WABLAS REQUEST]', {
         endpoint: waEndpoint,
-        method: httpMethod
+        method: httpMethod,
+        tokenLength: cleanToken.length,
+        headerAuthPrefix: cleanToken.slice(0, 4) + '...'
       });
 
       let pingRes: Response;
@@ -93,8 +117,8 @@ export default async function handler(req: any, res: any) {
         pingRes = await fetch(waEndpoint, {
           method: httpMethod,
           headers: {
-            Authorization: token.startsWith('Bearer ') ? token : token,
-            Accept: 'application/json'
+            'Authorization': cleanToken,
+            'Accept': 'application/json'
           },
           signal: AbortSignal.timeout(8000)
         });
@@ -107,6 +131,8 @@ export default async function handler(req: any, res: any) {
           success: false,
           source: 'INTERNAL_API',
           status: 500,
+          endpoint: waEndpoint,
+          headers: `Authorization: ${maskedToken}`,
           message: `Gagal menghubungi server gateway Wablas (${waServerUrl}): ${fetchErr?.message || 'Network Timeout / DNS Resolution failed'}`
         });
       }
@@ -134,7 +160,8 @@ export default async function handler(req: any, res: any) {
             source: 'WABLAS',
             message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
             device: responseJson.data || responseJson,
-            serverUrl: waServerUrl
+            serverUrl: waServerUrl,
+            endpoint: waEndpoint
           });
         } else {
           const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Perangkat belum terhubung di Wablas';
@@ -142,6 +169,11 @@ export default async function handler(req: any, res: any) {
             success: false,
             source: 'WABLAS',
             status: 200,
+            tokenLength: cleanToken.length,
+            tokenPrefix: cleanToken.slice(0, 4),
+            tokenSuffix: cleanToken.slice(-4),
+            endpoint: waEndpoint,
+            headers: `Authorization: ${maskedToken}`,
             message: `❌ Wablas: ${errMsg}`
           });
         }
@@ -151,6 +183,11 @@ export default async function handler(req: any, res: any) {
           success: false,
           source: 'WABLAS',
           status: responseStatus,
+          tokenLength: cleanToken.length,
+          tokenPrefix: cleanToken.slice(0, 4),
+          tokenSuffix: cleanToken.slice(-4),
+          endpoint: waEndpoint,
+          headers: `Authorization: ${maskedToken}`,
           message: `❌ Kunci API Wablas Tidak Valid (HTTP ${responseStatus}): ${errMsg}. Pastikan menyalin API Token yang benar dari dashboard Wablas (${waServerUrl}).`
         });
       } else if (responseStatus === 500) {
@@ -159,6 +196,11 @@ export default async function handler(req: any, res: any) {
           success: false,
           source: 'WABLAS',
           status: 500,
+          tokenLength: cleanToken.length,
+          tokenPrefix: cleanToken.slice(0, 4),
+          tokenSuffix: cleanToken.slice(-4),
+          endpoint: waEndpoint,
+          headers: `Authorization: ${maskedToken}`,
           message: `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP 500: ${errMsg}`
         });
       } else {
@@ -167,11 +209,52 @@ export default async function handler(req: any, res: any) {
           success: false,
           source: 'WABLAS',
           status: responseStatus,
+          tokenLength: cleanToken.length,
+          tokenPrefix: cleanToken.slice(0, 4),
+          tokenSuffix: cleanToken.slice(-4),
+          endpoint: waEndpoint,
+          headers: `Authorization: ${maskedToken}`,
           message: `❌ Wablas mengembalikan status HTTP ${responseStatus}: ${errMsg}`
         });
       }
+    } else if (provider === 'fonnte') {
+      const fonnteEndpoint = 'https://api.fonnte.com/device';
+      try {
+        const fonnteRes = await fetch(fonnteEndpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': cleanToken
+          },
+          signal: AbortSignal.timeout(8000)
+        });
+        const fonnteStatus = fonnteRes.status;
+        const fonnteData = await fonnteRes.json().catch(() => ({}));
+
+        if (fonnteStatus === 200 && fonnteData.status !== false) {
+          return res.status(200).json({
+            success: true,
+            status: 200,
+            source: 'FONNTE',
+            message: `✅ Koneksi Gateway Fonnte Berhasil & Device Terverifikasi! (Token: ${maskedToken})`,
+            device: fonnteData
+          });
+        } else {
+          return res.status(200).json({
+            success: false,
+            status: fonnteStatus,
+            source: 'FONNTE',
+            message: `❌ Fonnte: ${fonnteData.reason || fonnteData.message || 'Token Fonnte tidak valid / perangkat offline'}`
+          });
+        }
+      } catch (fErr: any) {
+        return res.status(200).json({
+          success: false,
+          source: 'FONNTE',
+          status: 500,
+          message: `Gagal menghubungi API Fonnte: ${fErr?.message || 'Network error'}`
+        });
+      }
     } else {
-      // Provider lain (Fonnte / Generic)
       return res.status(200).json({
         success: true,
         status: 200,
@@ -189,3 +272,4 @@ export default async function handler(req: any, res: any) {
     });
   }
 }
+

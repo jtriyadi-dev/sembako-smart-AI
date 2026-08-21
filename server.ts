@@ -954,13 +954,24 @@ async function startServer() {
     }
   });
 
-  // Helper: Decode Supabase JWT safely
-  function decodeSupabaseJwtServer(jwt: string): { ref?: string; role?: string; exp?: number; isExpired?: boolean; error?: string } {
+  function getSupabaseKeyTypeServer(key: string): 'publishable' | 'legacy_anon' {
+    const clean = key.trim().replace(/^bearer\s+/i, '');
+    if (clean.startsWith('sb_publishable_') || clean.startsWith('sbp_') || clean.startsWith('pk_')) {
+      return 'publishable';
+    }
+    if (clean.startsWith('eyJ')) {
+      return 'legacy_anon';
+    }
+    return 'publishable';
+  }
+
+  // Helper: Decode Supabase JWT safely if it is a JWT
+  function decodeSupabaseJwtServer(jwt: string): { ref?: string; role?: string; exp?: number; isExpired?: boolean } | null {
     try {
       const clean = jwt.trim().replace(/^bearer\s+/i, '');
       const parts = clean.split('.');
       if (parts.length !== 3) {
-        return { error: 'Format token bukan JWT 3-bagian (header.payload.signature).' };
+        return null;
       }
       const payloadStr = Buffer.from(parts[1], 'base64url').toString('utf-8');
       const payload = JSON.parse(payloadStr);
@@ -971,8 +982,8 @@ async function startServer() {
         exp: payload.exp,
         isExpired: payload.exp ? payload.exp < now : false
       };
-    } catch (e: any) {
-      return { error: `Gagal decode JWT payload: ${e.message}` };
+    } catch (_) {
+      return null;
     }
   }
 
@@ -984,18 +995,34 @@ async function startServer() {
       const provider = (body.provider || 'wablas').toLowerCase();
       
       // 1. Audit sumber nilai Token
-      const token = (
+      let rawToken = (
         body.token ||
         body.waApiKey ||
         body.apiKey ||
-        process.env.WABLAS_TOKEN ||
-        process.env.WABLAS_API_KEY ||
-        process.env.WA_API_KEY ||
         ''
       ).trim();
 
+      if (rawToken.includes('•') || rawToken === '---' || rawToken === '******') {
+        rawToken = '';
+      }
+
+      if (!rawToken) {
+        rawToken = (
+          process.env.WABLAS_TOKEN ||
+          process.env.WABLAS_API_KEY ||
+          process.env.WA_API_KEY ||
+          ''
+        ).trim();
+      }
+
+      const cleanToken = rawToken
+        .replace(/^["']|["']$/g, '')
+        .replace(/^bearer\s+/i, '')
+        .replace(/[\r\n\t\s]/g, '')
+        .trim();
+
       // 2. Audit sumber nilai Server URL
-      const waServerUrl = (
+      let waServerUrl = (
         body.waServerUrl ||
         body.serverUrl ||
         process.env.WABLAS_SERVER_URL ||
@@ -1013,24 +1040,28 @@ async function startServer() {
         '081234567890'
       ).trim();
 
-      // Safe config logging (no token exposed)
+      // Safe config logging
       console.log('[WA TEST CONFIG]', {
         provider,
-        tokenConfigured: !!token,
-        senderConfigured: !!sender,
+        tokenConfigured: !!cleanToken,
+        tokenLength: cleanToken.length,
+        tokenPrefix: cleanToken.length > 4 ? cleanToken.slice(0, 4) : '***',
+        tokenSuffix: cleanToken.length > 4 ? cleanToken.slice(-4) : '***',
         serverUrl: waServerUrl
       });
 
-      if (!token) {
+      if (!cleanToken) {
         return res.json({ 
           success: false,
           status: 400,
           source: "INTERNAL_API",
-          message: "Kunci API / Token Wablas tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server." 
+          message: "Kunci API / Token WhatsApp tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server." 
         });
       }
 
-      const maskedToken = token.length > 8 ? `${token.substring(0, 6)}...${token.slice(-4)}` : '******';
+      const maskedToken = cleanToken.length > 8
+        ? `${cleanToken.substring(0, 4)}...${cleanToken.slice(-4)}`
+        : '******';
 
       if (provider === 'wablas') {
         const waEndpoint = `${waServerUrl}/api/device/info`;
@@ -1038,7 +1069,9 @@ async function startServer() {
 
         console.log('[WABLAS REQUEST]', {
           endpoint: waEndpoint,
-          method: httpMethod
+          method: httpMethod,
+          tokenLength: cleanToken.length,
+          headerAuthPrefix: cleanToken.slice(0, 4) + '...'
         });
 
         let pingRes: any;
@@ -1046,8 +1079,8 @@ async function startServer() {
           pingRes = await fetch(waEndpoint, {
             method: httpMethod,
             headers: {
-              Authorization: token.startsWith('Bearer ') ? token : token,
-              Accept: 'application/json'
+              'Authorization': cleanToken,
+              'Accept': 'application/json'
             },
             signal: AbortSignal.timeout(8000)
           });
@@ -1060,6 +1093,8 @@ async function startServer() {
             success: false,
             source: "INTERNAL_API",
             status: 500,
+            endpoint: waEndpoint,
+            headers: `Authorization: ${maskedToken}`,
             message: `Gagal menghubungi server gateway Wablas (${waServerUrl}): ${fetchErr?.message || 'Network Timeout / DNS Resolution failed'}`
           });
         }
@@ -1086,7 +1121,8 @@ async function startServer() {
               source: "WABLAS",
               message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
               device: responseJson.data || responseJson,
-              serverUrl: waServerUrl
+              serverUrl: waServerUrl,
+              endpoint: waEndpoint
             });
           } else {
             const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Perangkat belum terhubung di Wablas';
@@ -1094,6 +1130,11 @@ async function startServer() {
               success: false,
               source: "WABLAS",
               status: 200,
+              tokenLength: cleanToken.length,
+              tokenPrefix: cleanToken.slice(0, 4),
+              tokenSuffix: cleanToken.slice(-4),
+              endpoint: waEndpoint,
+              headers: `Authorization: ${maskedToken}`,
               message: `❌ Wablas: ${errMsg}`
             });
           }
@@ -1103,6 +1144,11 @@ async function startServer() {
             success: false,
             source: "WABLAS",
             status: responseStatus,
+            tokenLength: cleanToken.length,
+            tokenPrefix: cleanToken.slice(0, 4),
+            tokenSuffix: cleanToken.slice(-4),
+            endpoint: waEndpoint,
+            headers: `Authorization: ${maskedToken}`,
             message: `❌ Kunci API Wablas Tidak Valid (HTTP ${responseStatus}): ${errMsg}. Pastikan menyalin API Token yang benar dari dashboard Wablas (${waServerUrl}).`
           });
         } else if (responseStatus === 500) {
@@ -1111,6 +1157,11 @@ async function startServer() {
             success: false,
             source: "WABLAS",
             status: 500,
+            tokenLength: cleanToken.length,
+            tokenPrefix: cleanToken.slice(0, 4),
+            tokenSuffix: cleanToken.slice(-4),
+            endpoint: waEndpoint,
+            headers: `Authorization: ${maskedToken}`,
             message: `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP 500: ${errMsg}`
           });
         } else {
@@ -1119,7 +1170,49 @@ async function startServer() {
             success: false,
             source: "WABLAS",
             status: responseStatus,
+            tokenLength: cleanToken.length,
+            tokenPrefix: cleanToken.slice(0, 4),
+            tokenSuffix: cleanToken.slice(-4),
+            endpoint: waEndpoint,
+            headers: `Authorization: ${maskedToken}`,
             message: `❌ Wablas mengembalikan status HTTP ${responseStatus}: ${errMsg}`
+          });
+        }
+      } else if (provider === 'fonnte') {
+        const fonnteEndpoint = 'https://api.fonnte.com/device';
+        try {
+          const fonnteRes = await fetch(fonnteEndpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': cleanToken
+            },
+            signal: AbortSignal.timeout(8000)
+          });
+          const fonnteStatus = fonnteRes.status;
+          const fonnteData = await fonnteRes.json().catch(() => ({}));
+
+          if (fonnteStatus === 200 && fonnteData.status !== false) {
+            return res.json({
+              success: true,
+              status: 200,
+              source: 'FONNTE',
+              message: `✅ Koneksi Gateway Fonnte Berhasil & Device Terverifikasi! (Token: ${maskedToken})`,
+              device: fonnteData
+            });
+          } else {
+            return res.json({
+              success: false,
+              status: fonnteStatus,
+              source: 'FONNTE',
+              message: `❌ Fonnte: ${fonnteData.reason || fonnteData.message || 'Token Fonnte tidak valid / perangkat offline'}`
+            });
+          }
+        } catch (fErr: any) {
+          return res.json({
+            success: false,
+            source: 'FONNTE',
+            status: 500,
+            message: `Gagal menghubungi API Fonnte: ${fErr?.message || 'Network error'}`
           });
         }
       } else {
@@ -1192,9 +1285,13 @@ async function startServer() {
       serviceRoleKey = serviceRoleKey.replace(/^bearer\s+/i, '');
       const hasRawServiceKey = serviceRoleKey.length > 0 && !serviceRoleKey.includes('•');
 
+      const detectedKeyType = getSupabaseKeyTypeServer(anonKey || serviceRoleKey);
+
       console.log('[SUPABASE TEST CONFIG]', {
         urlConfigured: !!url,
         anonKeyConfigured: !!anonKey,
+        anonKeyLength: anonKey.length,
+        anonKeyType: detectedKeyType,
         serviceRoleConfigured: hasRawServiceKey || !!process.env.SUPABASE_SERVICE_ROLE_KEY
       });
 
@@ -1212,7 +1309,7 @@ async function startServer() {
           success: false,
           status: 400,
           source: "INTERNAL_API",
-          message: "Kunci API Supabase (Anon Key / Publishable Key) tidak boleh kosong."
+          message: "Kunci API Supabase (Publishable Key / Anon Key) tidak boleh kosong."
         });
       }
 
@@ -1232,35 +1329,29 @@ async function startServer() {
       let clientTestResult: { success: boolean; status: number; role?: string; message: string; tableReady?: boolean } | null = null;
       let serverTestResult: { success: boolean; status: number; role?: string; message: string } | null = null;
 
-      // 5. TEST 1: SUPABASE CLIENT WEB (Anon / Publishable Key)
+      // 5. TEST 1: SUPABASE CLIENT WEB (Publishable Key / Legacy Anon Key)
       if (anonKey) {
         const anonJwt = decodeSupabaseJwtServer(anonKey);
-        if (anonJwt.error) {
-          return res.json({
-            success: false,
-            status: 401,
-            source: "SUPABASE",
-            message: `❌ Anon Key Supabase tidak valid: ${anonJwt.error}`
-          });
-        }
+        if (anonJwt) {
+          if (anonJwt.ref && anonJwt.ref !== urlProjectRef) {
+            return res.json({
+              success: false,
+              keyType: detectedKeyType,
+              status: 401,
+              source: "SUPABASE",
+              message: `❌ Project Mismatch pada Anon Key! Key berasal dari project "${anonJwt.ref}", sedangkan Project URL adalah "${urlProjectRef}". Harap salin public key dari project yang sama di Supabase Dashboard.`
+            });
+          }
 
-        // Project Match check
-        if (anonJwt.ref && anonJwt.ref !== urlProjectRef) {
-          return res.json({
-            success: false,
-            status: 401,
-            source: "SUPABASE",
-            message: `❌ Project Mismatch pada Anon Key! Key berasal dari project "${anonJwt.ref}", sedangkan Project URL adalah "${urlProjectRef}". Harap salin anon public key dari project yang sama di Supabase Dashboard.`
-          });
-        }
-
-        if (anonJwt.isExpired) {
-          return res.json({
-            success: false,
-            status: 401,
-            source: "SUPABASE",
-            message: '❌ Anon Key Supabase sudah kadaluarsa (expired).'
-          });
+          if (anonJwt.isExpired) {
+            return res.json({
+              success: false,
+              keyType: detectedKeyType,
+              status: 401,
+              source: "SUPABASE",
+              message: '❌ Anon Key Supabase sudah kadaluarsa (expired).'
+            });
+          }
         }
 
         // Direct REST ping with proper headers
@@ -1268,20 +1359,21 @@ async function startServer() {
           const restRes = await fetch(`${url}/rest/v1/`, {
             method: "GET",
             headers: {
-              apikey: anonKey,
-              Authorization: `Bearer ${anonKey}`,
-              "Content-Type": "application/json"
+              'apikey': anonKey,
+              'Authorization': `Bearer ${anonKey}`,
+              'Content-Type': 'application/json'
             },
-            signal: AbortSignal.timeout(7000)
+            signal: AbortSignal.timeout(8000)
           });
 
           const restStatus = restRes.status;
           const restBody = await restRes.text().catch(() => '');
 
-          console.log('[SUPABASE ANON REST TEST]', {
+          console.log('[SUPABASE REST TEST]', {
             status: restStatus,
             statusText: restRes.statusText,
-            body: restBody.substring(0, 300)
+            keyType: detectedKeyType,
+            bodySnippet: restBody.substring(0, 300)
           });
 
           if (restStatus === 401 || restStatus === 403) {
@@ -1294,20 +1386,21 @@ async function startServer() {
             }
             return res.json({
               success: false,
+              keyType: detectedKeyType,
               status: restStatus,
               source: "SUPABASE",
               message: `❌ Supabase mengembalikan HTTP ${restStatus}: ${errMsg}`
             });
           }
 
-          // Table query test
+          // Table query test with REST endpoint
           const tableRes = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
             headers: {
-              apikey: anonKey,
-              Authorization: `Bearer ${anonKey}`,
-              "Content-Type": "application/json"
+              'apikey': anonKey,
+              'Authorization': `Bearer ${anonKey}`,
+              'Content-Type': 'application/json'
             },
-            signal: AbortSignal.timeout(7000)
+            signal: AbortSignal.timeout(8000)
           });
 
           const isTableOk = tableRes.ok;
@@ -1316,14 +1409,15 @@ async function startServer() {
           clientTestResult = {
             success: true,
             status: 200,
-            role: anonJwt.role || 'anon',
+            role: anonJwt?.role || 'anon',
             tableReady: isTableOk,
-            message: isTableOk ? 'Terhubung & Tabel produk aktif' : 'Terhubung (Tabel database belum dibuat, jalankan SQL migration)'
+            message: isTableOk ? 'Terhubung & Tabel produk aktif' : 'Terhubung (Tabel database belum dibuat, jalankan skrip SQL migration)'
           };
         } catch (clientErr: any) {
           console.error('[SUPABASE CLIENT TEST ERROR]', clientErr);
           return res.json({
             success: false,
+            keyType: detectedKeyType,
             status: 500,
             source: "INTERNAL_API",
             message: `Gagal menghubungi Supabase: ${clientErr?.message || 'Network Timeout'}`
@@ -1335,49 +1429,49 @@ async function startServer() {
       const effectiveServiceKey = hasRawServiceKey ? serviceRoleKey : (process.env.SUPABASE_SERVICE_ROLE_KEY || '');
       if (effectiveServiceKey && !effectiveServiceKey.includes('•')) {
         const srvJwt = decodeSupabaseJwtServer(effectiveServiceKey);
-        if (!srvJwt.error) {
-          if (srvJwt.ref && srvJwt.ref !== urlProjectRef) {
-            return res.json({
+        if (srvJwt && srvJwt.ref && srvJwt.ref !== urlProjectRef) {
+          return res.json({
+            success: false,
+            keyType: detectedKeyType,
+            status: 401,
+            source: "SUPABASE",
+            message: `❌ Project Mismatch pada Service Role Key! Key berasal dari project "${srvJwt.ref}", sedangkan Project URL adalah "${urlProjectRef}".`
+          });
+        }
+
+        try {
+          const srvRes = await fetch(`${url}/rest/v1/remote_config?select=id&limit=1`, {
+            headers: {
+              'apikey': effectiveServiceKey,
+              'Authorization': `Bearer ${effectiveServiceKey}`,
+              'Content-Type': 'application/json'
+            },
+            signal: AbortSignal.timeout(8000)
+          });
+
+          if (srvRes.ok || srvRes.status === 404) {
+            serverTestResult = {
+              success: true,
+              status: 200,
+              role: srvJwt?.role || 'service_role',
+              message: 'Service Role Key terverifikasi & server bypass RLS aktif'
+            };
+          } else {
+            serverTestResult = {
               success: false,
-              status: 401,
-              source: "SUPABASE",
-              message: `❌ Project Mismatch pada Service Role Key! Key berasal dari project "${srvJwt.ref}", sedangkan Project URL adalah "${urlProjectRef}".`
-            });
+              status: srvRes.status,
+              role: srvJwt?.role || 'service_role',
+              message: `Status HTTP ${srvRes.status}`
+            };
           }
-
-          try {
-            const srvRes = await fetch(`${url}/rest/v1/remote_config?select=id&limit=1`, {
-              headers: {
-                apikey: effectiveServiceKey,
-                Authorization: `Bearer ${effectiveServiceKey}`,
-                "Content-Type": "application/json"
-              },
-              signal: AbortSignal.timeout(7000)
-            });
-
-            if (srvRes.ok || srvRes.status === 404) {
-              serverTestResult = {
-                success: true,
-                status: 200,
-                role: srvJwt.role || 'service_role',
-                message: 'Service Role Key terverifikasi & server bypass RLS aktif'
-              };
-            } else {
-              serverTestResult = {
-                success: false,
-                status: srvRes.status,
-                role: srvJwt.role || 'service_role',
-                message: `Status HTTP ${srvRes.status}`
-              };
-            }
-          } catch (srvErr: any) {
-            console.error('[SUPABASE SERVER TEST ERROR]', srvErr);
-          }
+        } catch (srvErr: any) {
+          console.error('[SUPABASE SERVER TEST ERROR]', srvErr);
         }
       }
 
       // 7. Format Final Output
       const isSuccess = Boolean(clientTestResult?.success || serverTestResult?.success);
+      const keyTypeLabel = detectedKeyType === 'publishable' ? 'Publishable Key (sb_publishable)' : 'Legacy Anon Key (JWT)';
       const tableNotice = clientTestResult?.tableReady === false
         ? ' (Tabel database belum dibuat, klik "Skrip SQL Schema Supabase" di bawah)'
         : ' (Database & REST API Siap Digunakan)';
@@ -1385,11 +1479,12 @@ async function startServer() {
       if (isSuccess) {
         return res.json({
           success: true,
+          keyType: detectedKeyType,
           status: 200,
           source: "SUPABASE",
           projectUrl: url,
           projectRef: urlProjectRef,
-          message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (Project: ${urlProjectRef})${tableNotice}`,
+          message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (Tipe: ${keyTypeLabel} / Project: ${urlProjectRef})${tableNotice}`,
           clientTest: clientTestResult,
           serverTest: serverTestResult
         });
@@ -1397,17 +1492,19 @@ async function startServer() {
 
       return res.json({
         success: false,
+        keyType: detectedKeyType,
         status: clientTestResult?.status || 401,
         source: "SUPABASE",
-        message: clientTestResult?.message || "Gagal memverifikasi kredensial Supabase."
+        message: clientTestResult?.message || 'Gagal memverifikasi kredensial Supabase.'
       });
+
     } catch (err: any) {
-      console.error("[SUPABASE TEST INTERNAL ERROR]:", err);
+      console.error('[SUPABASE TEST INTERNAL ERROR]:', err);
       return res.json({
         success: false,
         status: 500,
         source: "INTERNAL_API",
-        message: `❌ Error internal server: ${err?.message || "Koneksi terputus atau URL tidak dapat diakses."}`
+        message: `❌ Error internal server: ${err?.message || 'Koneksi terputus atau URL tidak dapat diakses.'}`
       });
     }
   });

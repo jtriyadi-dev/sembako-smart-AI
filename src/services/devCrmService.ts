@@ -587,10 +587,11 @@ export async function testGeminiApiKey(
   }
 }
 
-export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone: string }): Promise<{ success: boolean; message: string; status?: number; source?: string }> {
+export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone?: string; waServerUrl?: string }): Promise<{ success: boolean; message: string; status?: number; source?: string }> {
   const token = (config.token || '').trim();
   const provider = config.provider || 'wablas';
   const targetPhone = (config.targetPhone || '').trim();
+  const waServerUrl = (config.waServerUrl || '').trim();
 
   if (!token) {
     return {
@@ -606,7 +607,7 @@ export async function testWhatsAppGateway(config: { provider: string; token: str
     const { ok, data } = await safeJsonFetch('/api/developer/test-wa', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, token, targetPhone }),
+      body: JSON.stringify({ provider, token, targetPhone, waServerUrl }),
       signal: AbortSignal.timeout(9000)
     });
 

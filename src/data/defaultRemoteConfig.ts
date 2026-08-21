@@ -271,6 +271,7 @@ export const DEFAULT_API_KEYS: DeveloperApiKeys = {
   waGatewayProvider: 'fonnte',
   waApiKey: '',
   waSenderNumber: '081234567890',
+  waServerUrl: 'https://kudus.wablas.com',
   waWebhookUrl: '/api/whatsapp/webhook',
   paymentGatewayKey: '',
   cloudSyncUrl: 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42',

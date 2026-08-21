@@ -364,6 +364,7 @@ export interface DeveloperApiKeys {
   waGatewayProvider: 'fonnte' | 'wablas' | 'whacenter' | 'custom';
   waApiKey: string;
   waSenderNumber: string;
+  waServerUrl?: string;
   waWebhookUrl: string;
   paymentGatewayKey: string;
   cloudSyncUrl: string;
