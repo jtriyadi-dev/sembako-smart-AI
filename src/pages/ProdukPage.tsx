@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SupplierItem, ProdukItem } from '../types';
 import { 
   subscribeProducts, 
+  fetchProductsDirect,
   addProduct, 
   updateProduct, 
   deleteProduct 
@@ -190,8 +191,11 @@ export const ProdukPage: React.FC = () => {
       await addProduct(productPayload);
       success('Produk Ditambahkan', `Barang "${productPayload.nama}" berhasil disimpan ke Supabase Database.`);
       setIsAddModalOpen(false);
-    } catch (err) {
-      toastError('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan produk.');
+      const fresh = await fetchProductsDirect();
+      setProducts(fresh);
+    } catch (err: any) {
+      console.error('[UI Create Product Error]', err);
+      toastError('Gagal Menyimpan Produk', err?.message || 'Terjadi kesalahan saat menyimpan produk ke Supabase.');
     } finally {
       setIsSubmitting(false);
     }
@@ -204,8 +208,11 @@ export const ProdukPage: React.FC = () => {
       await updateProduct(editingProduct.id, productPayload);
       success('Produk Diupdate', `Data barang "${productPayload.nama}" berhasil diperbarui di Supabase Database.`);
       setEditingProduct(null);
-    } catch (err) {
-      toastError('Gagal Update', 'Terjadi kesalahan saat mengupdate produk.');
+      const fresh = await fetchProductsDirect();
+      setProducts(fresh);
+    } catch (err: any) {
+      console.error('[UI Update Product Error]', err);
+      toastError('Gagal Update Produk', err?.message || 'Terjadi kesalahan saat mengupdate produk di Supabase.');
     } finally {
       setIsSubmitting(false);
     }
@@ -217,8 +224,11 @@ export const ProdukPage: React.FC = () => {
       await deleteProduct(id);
       success('Produk Dihapus', 'Data barang telah dihapus dari Supabase Database.');
       setDeletingProduct(null);
-    } catch (err) {
-      toastError('Gagal Hapus', 'Terjadi kesalahan saat menghapus produk.');
+      const fresh = await fetchProductsDirect();
+      setProducts(fresh);
+    } catch (err: any) {
+      console.error('[UI Delete Product Error]', err);
+      toastError('Gagal Hapus Produk', err?.message || 'Terjadi kesalahan saat menghapus produk di Supabase.');
     } finally {
       setIsDeleting(false);
     }

@@ -85,8 +85,6 @@ export function sanitizeProduct(p: any, idx: number = 0): ProdukItem {
   };
 }
 
-const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
-
 // Helper to execute promises with a strict maximum timeout to prevent UI freezes
 export function promiseWithTimeout<T>(promise: Promise<T>, ms: number, fallbackValue?: any): Promise<T | any> {
   return Promise.race([
@@ -150,9 +148,9 @@ export async function fetchProductsDirectRest(overrideStoreId?: string): Promise
     }
   }
 
-  // 2. Express Server API (Proxies backend database)
+  // 2. Express Server API (Proxies backend database if running locally)
   try {
-    const serverRes = await fetch('/api/products', { signal: AbortSignal.timeout(3000) });
+    const serverRes = await fetch('/api/products', { signal: AbortSignal.timeout(2000) });
     if (serverRes.ok) {
       const data = await serverRes.json();
       if (data.products && Array.isArray(data.products) && data.products.length > 0) {
@@ -165,23 +163,7 @@ export async function fetchProductsDirectRest(overrideStoreId?: string): Promise
     }
   } catch (e) {}
 
-  // 3. Cloud Store Sync Object (Cross-instance backup)
-  try {
-    const cloudRes = await fetch(CLOUD_STORE_URL, { signal: AbortSignal.timeout(2500) });
-    if (cloudRes.ok) {
-      const cloudJson = await cloudRes.json();
-      const prods = cloudJson?.data?.products;
-      if (Array.isArray(prods) && prods.length > 0) {
-        const cleanProds = prods.map(sanitizeProduct);
-        try {
-          localStorage.setItem('sembako_cached_products', JSON.stringify(cleanProds));
-        } catch (e) {}
-        return cleanProds;
-      }
-    }
-  } catch (e) {}
-
-  // 4. LocalStorage Cache (Offline fallback only)
+  // 3. LocalStorage Cache (Offline fallback only)
   try {
     const cached = localStorage.getItem('sembako_cached_products');
     if (cached) {
@@ -192,7 +174,7 @@ export async function fetchProductsDirectRest(overrideStoreId?: string): Promise
     }
   } catch (e) {}
 
-  // 5. Firestore REST API (Final fallback)
+  // 4. Firestore REST API (Secondary cloud fallback)
   try {
     const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0297359647';
     const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBdN_T5Jj9mgq3DzQepGPNglE2eluW15s4';
@@ -240,8 +222,7 @@ export async function fetchProductsDirectRest(overrideStoreId?: string): Promise
     }
   } catch (err) {}
 
-  // 6. Return INITIAL_PRODUCTS if all sources return empty so app is instantly usable
-  return INITIAL_PRODUCTS.map((p, idx) => sanitizeProduct({ ...p, id: `prod-${idx + 1}` }));
+  return [];
 }
 
 /**
@@ -293,9 +274,7 @@ export function subscribeProducts(
   // 2. Initial Fetch from Supabase (Source of Truth)
   fetchProductsDirectRest(storeId).then((prods) => {
     if (!isUnsubscribed) {
-      if (prods.length > 0) {
-        onData(prods);
-      }
+      onData(prods);
     }
   }).catch((err) => {
     if (!isUnsubscribed && onError) {
@@ -308,21 +287,21 @@ export function subscribeProducts(
     if (isUnsubscribed) return;
     logSupabase('realtime', 'Pembaruan produk terdeteksi via Realtime, memuat ulang data...');
     const refreshed = await fetchProductsDirectRest(storeId);
-    if (!isUnsubscribed && refreshed.length > 0) {
+    if (!isUnsubscribed) {
       onData(refreshed);
     }
   });
 
-  // 4. Background Safety Polling (Every 3.5s to catch webhooks or network reconnects)
+  // 4. Background Safety Polling (Every 4s to catch network reconnects)
   const pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     try {
       const items = await fetchProductsDirectRest(storeId);
-      if (!isUnsubscribed && items.length > 0) {
+      if (!isUnsubscribed) {
         onData(items);
       }
     } catch (e) {}
-  }, 3500);
+  }, 4000);
 
   // 5. Firestore Fallback Listener
   let unsubscribeFirestore = () => {};
@@ -412,128 +391,234 @@ export async function seedSampleProducts(): Promise<void> {
 }
 
 /**
- * Add new product to Supabase (Source of Truth) + Express + Firestore
+ * Add new product to Supabase (Single Source of Truth)
  */
 export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<string> {
   const now = new Date().toISOString();
-  const id = `prod-${Date.now()}`;
-  const storeId = product.storeId || getCurrentStoreId();
+  const currentStoreId = (product.storeId || getCurrentStoreId() || '').trim();
 
-  const cleanProduct: ProdukItem = {
-    id,
-    storeId,
-    kode: product.kode || `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-    barcode: product.barcode || '',
-    nama: product.nama || 'Produk Sembako',
-    kategori: product.kategori || 'Sembako Utama',
-    hargaBeli: Number(product.hargaBeli) || 0,
-    hargaJual: Number(product.hargaJual) || 0,
+  // 1. Audit and Validate Store ID
+  console.log('[PRODUCT INSERT] Current Store ID:', currentStoreId);
+  if (!currentStoreId) {
+    console.error('[PRODUCT INSERT] Store ID tidak ditemukan.');
+    throw new Error('Store ID tidak ditemukan. Produk tidak dapat disimpan.');
+  }
+
+  // 2. Validate Supabase Client Connection
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    console.error('[PRODUCT INSERT] Supabase client tidak terkonfigurasi.');
+    throw new Error('Koneksi Supabase belum terkonfigurasi. Periksa API Keys di menu Developer.');
+  }
+
+  // 3. Supabase Auth Session Check
+  try {
+    const { data: authData, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      console.log('[SUPABASE AUTH USER] Session notice:', userError.message);
+    } else {
+      console.log('[SUPABASE AUTH USER]', authData?.user?.id || 'Anon / Active Tenant Session');
+    }
+  } catch (authErr) {
+    console.warn('[SUPABASE AUTH CHECK]', authErr);
+  }
+
+  // 4. Construct Product Payload (Matching database columns exactly)
+  const cleanKode = (product.kode || '').trim() || `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
+  const cleanNama = (product.nama || '').trim();
+  if (!cleanNama) {
+    throw new Error('Nama produk sembako wajib diisi.');
+  }
+
+  const productPayload: Record<string, any> = {
+    store_id: currentStoreId,
+    kode: cleanKode,
+    nama: cleanNama,
+    kategori: (product.kategori || 'Sembako Utama').trim(),
+    harga_beli: Number(product.hargaBeli) || 0,
+    harga_jual: Number(product.hargaJual) || 0,
     stok: Number(product.stok) || 0,
-    minStok: Number(product.minStok) || 5,
-    satuan: product.satuan || 'Pcs',
-    gambarUrl: product.gambarUrl || '',
-    deskripsi: product.deskripsi || '',
-    expiredDate: product.expiredDate || '',
-    batchNo: product.batchNo || '',
-    supplierNama: product.supplierNama || '',
+    min_stok: Number(product.minStok) || 5,
+    satuan: (product.satuan || 'Pcs').trim(),
     terjual: Number(product.terjual) || 0,
-    createdAt: now,
-    updatedAt: now,
+    created_at: now,
+    updated_at: now,
   };
 
-  // 1. Instant Optimistic Local Cache Update (<1ms)
+  if (product.barcode && product.barcode.trim()) productPayload.barcode = product.barcode.trim();
+  if (product.gambarUrl && product.gambarUrl.trim()) productPayload.gambar_url = product.gambarUrl.trim();
+  if (product.deskripsi && product.deskripsi.trim()) productPayload.deskripsi = product.deskripsi.trim();
+  if (product.expiredDate && product.expiredDate.trim()) productPayload.expired_date = product.expiredDate.trim();
+  if (product.batchNo && product.batchNo.trim()) productPayload.batch_no = product.batchNo.trim();
+  if (product.supplierNama && product.supplierNama.trim()) productPayload.supplier = product.supplierNama.trim();
+
+  console.log('[PRODUCT INSERT] Payload:', productPayload);
+
+  // 5. Execute Strict Supabase INSERT
+  let insertRes = await supabase
+    .from('products')
+    .insert([productPayload])
+    .select()
+    .single();
+
+  let data = insertRes.data;
+  let error = insertRes.error;
+
+  // Fallback for optional column mismatch in older table schemas
+  if (error && isMissingColumnError(error)) {
+    console.warn('[PRODUCT INSERT] Missing column in database schema, retrying without non-critical columns...', error.message);
+    const minimalPayload: Record<string, any> = {
+      kode: productPayload.kode,
+      nama: productPayload.nama,
+      kategori: productPayload.kategori,
+      harga_beli: productPayload.harga_beli,
+      harga_jual: productPayload.harga_jual,
+      stok: productPayload.stok,
+      min_stok: productPayload.min_stok,
+      satuan: productPayload.satuan,
+      created_at: now,
+      updated_at: now,
+    };
+    if (!error.message?.includes('store_id')) {
+      minimalPayload.store_id = currentStoreId;
+    }
+    if (productPayload.barcode && !error.message?.includes('barcode')) {
+      minimalPayload.barcode = productPayload.barcode;
+    }
+    const retryRes = await supabase
+      .from('products')
+      .insert([minimalPayload])
+      .select()
+      .single();
+
+    data = retryRes.data;
+    error = retryRes.error;
+  }
+
+  // 6. Complete Error Handling
+  if (error) {
+    console.error('[PRODUCT INSERT FAILED]', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint
+    });
+    throw new Error(`Gagal menyimpan produk ke Supabase: ${error.message || 'Database error'}`);
+  }
+
+  console.log('[Supabase INSERT SUCCESS]', data);
+  logSupabase('sync', `Produk baru "${cleanNama}" (${cleanKode}) berhasil disimpan ke Supabase! ID: ${data?.id}`);
+
+  const insertedId = String(data?.id || `prod-${Date.now()}`);
+
+  // 7. Update Local Storage Cache with the verified saved record
+  const savedItem: ProdukItem = sanitizeProduct({
+    id: insertedId,
+    storeId: currentStoreId,
+    kode: data?.kode || productPayload.kode,
+    barcode: data?.barcode || productPayload.barcode || '',
+    nama: data?.nama || productPayload.nama,
+    kategori: data?.kategori || productPayload.kategori,
+    hargaBeli: Number(data?.harga_beli ?? productPayload.harga_beli),
+    hargaJual: Number(data?.harga_jual ?? productPayload.harga_jual),
+    stok: Number(data?.stok ?? productPayload.stok),
+    minStok: Number(data?.min_stok ?? productPayload.min_stok),
+    satuan: data?.satuan || productPayload.satuan,
+    gambarUrl: data?.gambar_url || productPayload.gambar_url || '',
+    deskripsi: data?.deskripsi || productPayload.deskripsi || '',
+    expiredDate: data?.expired_date || productPayload.expired_date || '',
+    batchNo: data?.batch_no || productPayload.batch_no || '',
+    supplierNama: data?.supplier || productPayload.supplier || '',
+    terjual: Number(data?.terjual ?? productPayload.terjual ?? 0),
+    createdAt: data?.created_at || now,
+    updatedAt: data?.updated_at || now,
+  });
+
   try {
     const cached = localStorage.getItem('sembako_cached_products');
     const list = cached ? JSON.parse(cached) : [];
-    list.unshift(cleanProduct);
+    list.unshift(savedItem);
     localStorage.setItem('sembako_cached_products', JSON.stringify(list));
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('sembako_products_updated'));
     }
   } catch (_) {}
 
-  // 2. Parallel Synchronization with timeouts: Supabase (Primary) + Express + Firestore
-  const syncSupabase = async () => {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-    try {
-      const { error } = await upsertWithColumnFallback(supabase, 'products', [{
-        id: cleanProduct.id,
-        store_id: storeId,
-        kode: cleanProduct.kode,
-        barcode: cleanProduct.barcode || null,
-        nama: cleanProduct.nama,
-        kategori: cleanProduct.kategori,
-        harga_beli: cleanProduct.hargaBeli,
-        harga_jual: cleanProduct.hargaJual,
-        stok: cleanProduct.stok,
-        min_stok: cleanProduct.minStok,
-        satuan: cleanProduct.satuan,
-        gambar_url: cleanProduct.gambarUrl || null,
-        deskripsi: cleanProduct.deskripsi || null,
-        expired_date: cleanProduct.expiredDate || null,
-        batch_no: cleanProduct.batchNo || null,
-        supplier: cleanProduct.supplierNama || null,
-        terjual: cleanProduct.terjual || 0,
-        created_at: now,
-        updated_at: now,
-      }], 'id');
+  // 8. Background secondary replica sync (Firestore & Express if active)
+  try {
+    const productDocRef = doc(db, COLLECTIONS.PRODUCTS, insertedId);
+    setDoc(productDocRef, savedItem, { merge: true }).catch(() => {});
+  } catch (_) {}
 
-      if (error) {
-        logSupabase('error', `Gagal menambahkan produk ke Supabase: ${error.message}`, error);
-      } else {
-        logSupabase('sync', `Produk baru "${cleanProduct.nama}" (${cleanProduct.kode}) tersimpan di Supabase (Store: ${storeId})`);
-      }
-    } catch (sbErr: any) {
-      logSupabase('error', 'Exception addProduct Supabase:', sbErr);
-    }
-  };
-
-  const syncExpress = async () => {
-    try {
-      await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cleanProduct),
-        signal: AbortSignal.timeout(2500)
-      });
-    } catch (_) {}
-  };
-
-  const syncFirestore = async () => {
-    try {
-      const productDocRef = doc(db, COLLECTIONS.PRODUCTS, cleanProduct.id);
-      await promiseWithTimeout(setDoc(productDocRef, cleanProduct, { merge: true }), 1500, null);
-    } catch (_) {}
-  };
-
-  // Run in background / parallel with a quick 700ms cap so the modal closes instantly
-  await promiseWithTimeout(
-    Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]),
-    700,
-    []
-  );
-
-  return id;
+  return insertedId;
 }
 
 /**
- * Update existing product in Supabase + Express + Firestore
+ * Update existing product in Supabase (Single Source of Truth)
  */
 export async function updateProduct(id: string, product: Partial<ProdukItem>): Promise<void> {
   const now = new Date().toISOString();
-  const storeId = product.storeId || getCurrentStoreId();
+  const currentStoreId = product.storeId || getCurrentStoreId();
+  const supabase = getSupabaseClient();
 
-  // 1. Instant Optimistic Local Cache Update (<1ms)
-  let updatedItem: ProdukItem | null = null;
+  if (!supabase) {
+    throw new Error('Koneksi Supabase belum terkonfigurasi.');
+  }
+
+  const sbUpdate: any = { updated_at: now };
+  if (product.nama !== undefined) sbUpdate.nama = product.nama.trim();
+  if (product.kode !== undefined) sbUpdate.kode = product.kode.trim();
+  if (product.barcode !== undefined) sbUpdate.barcode = product.barcode.trim();
+  if (product.kategori !== undefined) sbUpdate.kategori = product.kategori;
+  if (product.hargaBeli !== undefined) sbUpdate.harga_beli = Number(product.hargaBeli);
+  if (product.hargaJual !== undefined) sbUpdate.harga_jual = Number(product.hargaJual);
+  if (product.stok !== undefined) sbUpdate.stok = Number(product.stok);
+  if (product.minStok !== undefined) sbUpdate.min_stok = Number(product.minStok);
+  if (product.satuan !== undefined) sbUpdate.satuan = product.satuan;
+  if (product.gambarUrl !== undefined) sbUpdate.gambar_url = product.gambarUrl;
+  if (product.deskripsi !== undefined) sbUpdate.deskripsi = product.deskripsi;
+  if (product.expiredDate !== undefined) sbUpdate.expired_date = product.expiredDate;
+  if (product.batchNo !== undefined) sbUpdate.batch_no = product.batchNo;
+  if (product.supplierNama !== undefined) sbUpdate.supplier = product.supplierNama;
+  if (product.terjual !== undefined) sbUpdate.terjual = Number(product.terjual);
+  if (currentStoreId) sbUpdate.store_id = currentStoreId;
+
+  console.log('[PRODUCT UPDATE] Updating product ID:', id, sbUpdate);
+
+  let { data, error } = await supabase
+    .from('products')
+    .update(sbUpdate)
+    .eq('id', id)
+    .select();
+
+  if (error && isMissingColumnError(error)) {
+    delete sbUpdate.store_id;
+    const retry = await supabase.from('products').update(sbUpdate).eq('id', id).select();
+    error = retry.error;
+    data = retry.data;
+  }
+
+  if (error) {
+    console.error('[PRODUCT UPDATE FAILED]', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint
+    });
+    throw new Error(`Gagal update produk di Supabase: ${error.message}`);
+  }
+
+  console.log('[Supabase UPDATE SUCCESS]', data);
+  logSupabase('sync', `Produk ID "${id}" berhasil diperbarui di Supabase`);
+
+  // Update local cache
   try {
     const cached = localStorage.getItem('sembako_cached_products');
     if (cached) {
       const list = JSON.parse(cached);
-      const idx = list.findIndex((p: any) => p.id === id);
+      const idx = list.findIndex((p: any) => String(p.id) === String(id));
       if (idx !== -1) {
         list[idx] = { ...list[idx], ...product, updatedAt: now };
-        updatedItem = list[idx];
         localStorage.setItem('sembako_cached_products', JSON.stringify(list));
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('sembako_products_updated'));
@@ -542,90 +627,48 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
     }
   } catch (_) {}
 
-  // 2. Parallel Synchronization with timeouts: Supabase (Primary) + Express + Firestore
-  const syncSupabase = async () => {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-    try {
-      const sbUpdate: any = { updated_at: now };
-      if (product.nama !== undefined) sbUpdate.nama = product.nama;
-      if (product.kode !== undefined) sbUpdate.kode = product.kode;
-      if (product.barcode !== undefined) sbUpdate.barcode = product.barcode;
-      if (product.kategori !== undefined) sbUpdate.kategori = product.kategori;
-      if (product.hargaBeli !== undefined) sbUpdate.harga_beli = product.hargaBeli;
-      if (product.hargaJual !== undefined) sbUpdate.harga_jual = product.hargaJual;
-      if (product.stok !== undefined) sbUpdate.stok = product.stok;
-      if (product.minStok !== undefined) sbUpdate.min_stok = product.minStok;
-      if (product.satuan !== undefined) sbUpdate.satuan = product.satuan;
-      if (product.gambarUrl !== undefined) sbUpdate.gambar_url = product.gambarUrl;
-      if (product.deskripsi !== undefined) sbUpdate.deskripsi = product.deskripsi;
-      if (product.expiredDate !== undefined) sbUpdate.expired_date = product.expiredDate;
-      if (product.batchNo !== undefined) sbUpdate.batch_no = product.batchNo;
-      if (product.supplierNama !== undefined) sbUpdate.supplier = product.supplierNama;
-      if (product.terjual !== undefined) sbUpdate.terjual = product.terjual;
-      if (storeId) sbUpdate.store_id = storeId;
-
-      let { error } = await supabase.from('products').update(sbUpdate).eq('id', id);
-      if (error && isMissingColumnError(error)) {
-        delete sbUpdate.store_id;
-        const retry = await supabase.from('products').update(sbUpdate).eq('id', id);
-        error = retry.error;
-      }
-
-      if (error) {
-        logSupabase('error', `Gagal update produk ${id} di Supabase: ${error.message}`, error);
-      } else {
-        logSupabase('sync', `Produk ${id} berhasil diperbarui di Supabase (Stok: ${product.stok})`);
-      }
-    } catch (sbErr: any) {
-      logSupabase('error', 'Exception updateProduct Supabase:', sbErr);
-    }
-  };
-
-  const syncExpress = async () => {
-    if (!updatedItem) return;
-    try {
-      await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedItem),
-        signal: AbortSignal.timeout(2500)
-      });
-    } catch (_) {}
-  };
-
-  const syncFirestore = async () => {
-    try {
-      const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-      const updateData = {
-        ...product,
-        updatedAt: now,
-      };
-      Object.keys(updateData).forEach(
-        (key) => (updateData as any)[key] === undefined && delete (updateData as any)[key]
-      );
-      await promiseWithTimeout(setDoc(productRef, updateData, { merge: true }), 1500, null);
-    } catch (_) {}
-  };
-
-  await promiseWithTimeout(
-    Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]),
-    700,
-    []
-  );
+  // Background Firestore replica update
+  try {
+    const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
+    const updateData = { ...product, updatedAt: now };
+    setDoc(productRef, updateData, { merge: true }).catch(() => {});
+  } catch (_) {}
 }
 
 /**
- * Delete product from Supabase & Firestore
+ * Delete product from Supabase (Single Source of Truth)
  */
 export async function deleteProduct(id: string): Promise<void> {
-  const storeId = getCurrentStoreId();
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    throw new Error('Koneksi Supabase belum terkonfigurasi.');
+  }
 
-  // 1. Instant Optimistic Local Cache Update
+  console.log('[PRODUCT DELETE] Deleting product ID:', id);
+
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('[PRODUCT DELETE FAILED]', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint
+    });
+    throw new Error(`Gagal menghapus produk dari Supabase: ${error.message}`);
+  }
+
+  console.log('[Supabase DELETE SUCCESS] Product ID:', id);
+  logSupabase('sync', `Produk ID "${id}" berhasil dihapus dari Supabase`);
+
+  // Update local cache
   try {
     const cached = localStorage.getItem('sembako_cached_products');
     if (cached) {
-      const list = JSON.parse(cached).filter((p: any) => p.id !== id);
+      const list = JSON.parse(cached).filter((p: any) => String(p.id) !== String(id));
       localStorage.setItem('sembako_cached_products', JSON.stringify(list));
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('sembako_products_updated'));
@@ -633,40 +676,11 @@ export async function deleteProduct(id: string): Promise<void> {
     }
   } catch (_) {}
 
-  // 2. Parallel Deletion across Supabase + Express + Firestore
-  const deleteSupabase = async () => {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-    try {
-      const { error } = await supabase.from('products').delete().eq('id', id);
-      if (error) {
-        logSupabase('error', `Gagal menghapus produk ${id} dari Supabase: ${error.message}`, error);
-      } else {
-        logSupabase('sync', `Produk ${id} berhasil dihapus dari Supabase`);
-      }
-    } catch (sbErr: any) {
-      logSupabase('error', 'Exception deleteProduct Supabase:', sbErr);
-    }
-  };
-
-  const deleteExpress = async () => {
-    try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(2000) });
-    } catch (_) {}
-  };
-
-  const deleteFirestore = async () => {
-    try {
-      const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-      await promiseWithTimeout(deleteDoc(productRef), 1500, null);
-    } catch (_) {}
-  };
-
-  await promiseWithTimeout(
-    Promise.allSettled([deleteSupabase(), deleteExpress(), deleteFirestore()]),
-    700,
-    []
-  );
+  // Background Firestore replica delete
+  try {
+    const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
+    deleteDoc(productRef).catch(() => {});
+  } catch (_) {}
 }
 
 /**
