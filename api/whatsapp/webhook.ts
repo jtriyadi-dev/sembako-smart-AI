@@ -1,28 +1,24 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Helper to get server-side Supabase client
-function getSupabaseServerClient(): SupabaseClient | null {
-  const url = (
-    process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    'https://wwnvddrmwxkomkkbhfep.supabase.co'
-  ).trim().replace(/\/+$/, '');
+// Helper to get server-side Supabase client with strict environment variable validation
+function getSupabaseServerClient(): SupabaseClient {
+  console.log('[WA SUPABASE CONFIG]', {
+    urlConfigured: !!process.env.SUPABASE_URL,
+    serviceRoleConfigured: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+  });
 
-  const key = (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    ''
-  ).trim().replace(/^bearer\s+/i, '');
-
-  if (!url || !key) {
-    console.error('[WA WEBHOOK] Missing SUPABASE_URL or SUPABASE_ANON_KEY in server environment');
-    return null;
+  if (!process.env.SUPABASE_URL) {
+    throw new Error('SUPABASE_URL missing');
   }
 
-  return createClient(url, key, {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY missing');
+  }
+
+  const url = process.env.SUPABASE_URL.trim().replace(/\/+$/, '');
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY.trim().replace(/^bearer\s+/i, '');
+
+  return createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false }
   });
 }
@@ -240,15 +236,17 @@ export default async function handler(req: any, res: any) {
     const upperMsg = messageText.toUpperCase();
 
     // Initialize Supabase Server Client
-    const supabase = getSupabaseServerClient();
-    if (!supabase) {
-      console.error('[WA PRODUCT] Supabase server client failed to initialize');
+    let supabase: SupabaseClient;
+    try {
+      supabase = getSupabaseServerClient();
+    } catch (configErr: any) {
+      console.error('[WA SUPABASE ERROR]', configErr?.message);
       return res.status(200).json({
         status: false,
-        message: '❌ Koneksi server Supabase belum terkonfigurasi.',
-        error: 'SUPABASE_URL or SUPABASE_KEY is missing',
-        reply: '❌ [POS Toko Sembako] Gagal terhubung ke database cloud Supabase.',
-        data: [{ message: '❌ [POS Toko Sembako] Gagal terhubung ke database cloud Supabase.' }]
+        message: `❌ Koneksi server Supabase belum terkonfigurasi: ${configErr?.message}`,
+        error: configErr?.message || 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing',
+        reply: `❌ [POS Toko Sembako] Gagal terhubung ke database cloud Supabase (${configErr?.message}).`,
+        data: [{ message: `❌ [POS Toko Sembako] Gagal terhubung ke database cloud Supabase (${configErr?.message}).` }]
       });
     }
 

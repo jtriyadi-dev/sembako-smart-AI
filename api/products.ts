@@ -1,20 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 function getSupabaseServerClient() {
-  const url = (
-    process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    'https://wwnvddrmwxkomkkbhfep.supabase.co'
-  ).trim().replace(/\/+$/, '');
-
-  const key = (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    ''
-  ).trim().replace(/^bearer\s+/i, '');
+  const url = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim().replace(/^bearer\s+/i, '');
 
   if (!url || !key) return null;
   return createClient(url, key, {

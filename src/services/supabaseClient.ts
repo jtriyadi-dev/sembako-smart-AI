@@ -285,8 +285,8 @@ export function generateDevicePairingUrl(customStoreId?: string): string {
   } catch (_) {}
 
   const env = (import.meta as any).env || {};
-  const url = (localKeys.supabaseUrl || env.VITE_SUPABASE_URL || env.SUPABASE_URL || '').trim();
-  const key = (localKeys.supabaseAnonKey || localKeys.supabaseServiceRoleKey || env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+  const url = (localKeys.supabaseUrl || env.VITE_SUPABASE_URL || '').trim();
+  const key = (localKeys.supabaseAnonKey || env.VITE_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_ANON_KEY || '').trim();
   const activeStore = customStoreId || getCurrentStoreId();
 
   const payload: PairingPayload = {
@@ -409,17 +409,14 @@ export function getSupabaseClient(overrideUrl?: string, overrideKey?: string): S
     overrideUrl ||
     localKeys.supabaseUrl ||
     env.VITE_SUPABASE_URL ||
-    env.SUPABASE_URL ||
     ''
   ).trim();
 
   let key = (
     overrideKey ||
-    localKeys.supabaseServiceRoleKey ||
     localKeys.supabaseAnonKey ||
-    env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
     env.VITE_SUPABASE_ANON_KEY ||
-    env.SUPABASE_PUBLISHABLE_KEY ||
     ''
   ).trim();
 
