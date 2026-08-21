@@ -587,50 +587,59 @@ export async function testGeminiApiKey(
   }
 }
 
-export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone: string }): Promise<{ success: boolean; message: string }> {
+export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone: string }): Promise<{ success: boolean; message: string; status?: number; source?: string }> {
   const token = (config.token || '').trim();
-  const provider = config.provider || 'fonnte';
+  const provider = config.provider || 'wablas';
   const targetPhone = (config.targetPhone || '').trim();
 
   if (!token) {
     return {
       success: false,
+      source: 'INTERNAL_API',
+      status: 400,
       message: 'Token / API Key WhatsApp belum diisi. Silakan masukkan token gateway.'
     };
   }
 
-  // 1. Try server-side endpoint first
+  // 1. Send live verification request to server-side endpoint
   try {
     const { ok, data } = await safeJsonFetch('/api/developer/test-wa', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, token, targetPhone }),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(9000)
     });
 
     if (ok && data && typeof data.success === 'boolean') {
       return data;
     }
-  } catch (err) {
-    // Proceed to fallback validation
-  }
 
-  // 2. Client-side token format validation fallback
-  if (token.length < 8) {
+    if (data && data.message) {
+      return {
+        success: Boolean(data.success),
+        source: data.source || 'INTERNAL_API',
+        status: data.status || 500,
+        message: data.message
+      };
+    }
+  } catch (err: any) {
     return {
       success: false,
-      message: `❌ Token terlalu pendek (${token.length} karakter). Harap periksa kembali token dari dashboard ${provider.toUpperCase()}.`
+      source: 'INTERNAL_API',
+      status: 500,
+      message: `❌ Uji koneksi gagal: ${err?.message || 'Tidak dapat menghubungi server backend'}`
     };
   }
 
-  const maskedToken = `${token.substring(0, 6)}...${token.slice(-4)}`;
   return {
-    success: true,
-    message: `✅ Gateway ${provider.toUpperCase()} Valid (${maskedToken}) & Siap Terhubung ke ${targetPhone || 'Nomor Tujuan'}. Siap mengirim pesan & notifikasi.`
+    success: false,
+    source: 'INTERNAL_API',
+    status: 500,
+    message: '❌ Tidak mendapat respon yang valid dari server saat menguji gateway WhatsApp.'
   };
 }
 
-export async function testSupabaseGateway(config: { supabaseUrl: string; supabaseAnonKey?: string; supabaseServiceRoleKey?: string }): Promise<{ success: boolean; message: string }> {
+export async function testSupabaseGateway(config: { supabaseUrl: string; supabaseAnonKey?: string; supabaseServiceRoleKey?: string }): Promise<{ success: boolean; message: string; status?: number; source?: string }> {
   const url = (config.supabaseUrl || '').trim();
   const anonKey = (config.supabaseAnonKey || '').trim();
   const serviceKey = (config.supabaseServiceRoleKey || '').trim();
@@ -639,6 +648,8 @@ export async function testSupabaseGateway(config: { supabaseUrl: string; supabas
   if (!url || !key) {
     return {
       success: false,
+      source: 'INTERNAL_API',
+      status: 400,
       message: 'URL Supabase dan Key API wajib diisi.'
     };
   }
@@ -654,11 +665,20 @@ export async function testSupabaseGateway(config: { supabaseUrl: string; supabas
         supabaseAnonKey: anonKey,
         supabaseServiceRoleKey: serviceKey && !serviceKey.includes('•') ? serviceKey : undefined
       }),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(9000)
     });
 
     if (ok && data && typeof data.success === 'boolean') {
       return data;
+    }
+
+    if (data && data.message) {
+      return {
+        success: Boolean(data.success),
+        source: data.source || 'SUPABASE',
+        status: data.status || 401,
+        message: data.message
+      };
     }
   } catch (err) {}
 
@@ -669,6 +689,8 @@ export async function testSupabaseGateway(config: { supabaseUrl: string; supabas
   } catch (e: any) {
     return {
       success: false,
+      source: 'INTERNAL_API',
+      status: 500,
       message: `❌ Gagal menguji Supabase: ${e?.message || 'Error init client'}`
     };
   }

@@ -745,13 +745,30 @@ export async function testSupabaseConnection(
     };
   }
 
-  // Validate URL format
-  if (!cleanUrl.startsWith('https://') || !cleanUrl.includes('.supabase.co')) {
+  // Validate URL format & extract project ref
+  const urlMatch = cleanUrl.match(/https:\/\/([a-z0-9-]+)\.supabase\.co/i);
+  if (!urlMatch) {
     return {
       success: false,
       message: 'Format URL Supabase tidak valid. Contoh yang benar: https://abcdefghijklmn.supabase.co',
     };
   }
+  const urlProjectRef = urlMatch[1];
+
+  // Decode JWT payload to check project match
+  try {
+    const parts = cleanKey.split('.');
+    if (parts.length === 3) {
+      const payloadStr = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+      const payload = JSON.parse(payloadStr);
+      if (payload.ref && payload.ref !== urlProjectRef) {
+        return {
+          success: false,
+          message: `❌ Project Mismatch! Key berasal dari project "${payload.ref}", sedangkan URL Supabase adalah "${urlProjectRef}". Harap salin anon public key dari project yang sama di Supabase Dashboard.`,
+        };
+      }
+    }
+  } catch (_) {}
 
   try {
     // 1. First test official Supabase Auth/GoTrue Settings endpoint (verifies API Key signature)
@@ -799,7 +816,7 @@ export async function testSupabaseConnection(
 
       return {
         success: true,
-        message: `✅ Berhasil Terhubung ke Supabase Cloud Database!${tableNotice}`,
+        message: `✅ Berhasil Terhubung ke Supabase Cloud Database! (Project: ${urlProjectRef})${tableNotice}`,
         projectUrl: cleanUrl,
       };
     }

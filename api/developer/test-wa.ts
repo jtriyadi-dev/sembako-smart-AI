@@ -14,7 +14,12 @@ export default async function handler(req: any, res: any) {
   }
 
   if (method !== 'POST') {
-    return res.status(405).json({ success: false, status: false, message: 'Method Not Allowed' });
+    return res.status(405).json({
+      success: false,
+      status: 405,
+      source: 'INTERNAL_API',
+      message: 'Method Not Allowed'
+    });
   }
 
   try {
@@ -24,6 +29,8 @@ export default async function handler(req: any, res: any) {
     }
 
     const provider = (body.provider || 'wablas').toLowerCase();
+    
+    // 1. Audit sumber nilai Token (Prioritas: Payload Control Panel -> Env Server)
     const token = (
       body.token ||
       body.waApiKey ||
@@ -34,6 +41,7 @@ export default async function handler(req: any, res: any) {
       ''
     ).trim();
 
+    // 2. Audit sumber nilai Server URL
     const waServerUrl = (
       body.waServerUrl ||
       body.serverUrl ||
@@ -41,7 +49,8 @@ export default async function handler(req: any, res: any) {
       'https://kudus.wablas.com'
     ).trim().replace(/\/+$/, '');
 
-    const targetPhone = (
+    // 3. Audit sumber nilai Sender
+    const sender = (
       body.targetPhone ||
       body.phone ||
       body.sender ||
@@ -51,78 +60,132 @@ export default async function handler(req: any, res: any) {
       '081234567890'
     ).trim();
 
+    // Log konfigurasi secara aman tanpa mengekspos token
+    console.log('[WA TEST CONFIG]', {
+      provider,
+      tokenConfigured: !!token,
+      senderConfigured: !!sender,
+      serverUrl: waServerUrl
+    });
+
     if (!token) {
       return res.status(200).json({
         success: false,
-        status: false,
-        error: 'SERVER_ENV_NOT_CONFIGURED',
-        message: 'Kunci API Wablas/WhatsApp tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server hosting.'
+        status: 400,
+        source: 'INTERNAL_API',
+        message: 'Kunci API / Token Wablas tidak boleh kosong. Harap isi token di Control Panel atau set environment variable WABLAS_TOKEN di server.'
       });
     }
 
     const maskedToken = token.length > 8 ? `${token.substring(0, 6)}...${token.slice(-4)}` : '******';
 
     if (provider === 'wablas') {
-      try {
-        const pingRes = await fetch(`${waServerUrl}/api/device/info`, {
-          headers: {
-            Authorization: token.startsWith('Bearer ') ? token : `${token}`
-          },
-          signal: AbortSignal.timeout(6000)
-        });
+      const waEndpoint = `${waServerUrl}/api/device/info`;
+      const httpMethod = 'GET';
 
-        if (pingRes.ok) {
-          const pingData = await pingRes.json().catch(() => ({}));
+      console.log('[WABLAS REQUEST]', {
+        endpoint: waEndpoint,
+        method: httpMethod
+      });
+
+      let pingRes: Response;
+      try {
+        pingRes = await fetch(waEndpoint, {
+          method: httpMethod,
+          headers: {
+            Authorization: token.startsWith('Bearer ') ? token : token,
+            Accept: 'application/json'
+          },
+          signal: AbortSignal.timeout(8000)
+        });
+      } catch (fetchErr: any) {
+        console.error('[WABLAS FETCH ERROR]', {
+          endpoint: waEndpoint,
+          error: fetchErr?.message
+        });
+        return res.status(200).json({
+          success: false,
+          source: 'INTERNAL_API',
+          status: 500,
+          message: `Gagal menghubungi server gateway Wablas (${waServerUrl}): ${fetchErr?.message || 'Network Timeout / DNS Resolution failed'}`
+        });
+      }
+
+      const responseStatus = pingRes.status;
+      const responseText = await pingRes.text().catch(() => '');
+      let responseJson: any = null;
+      try {
+        responseJson = JSON.parse(responseText);
+      } catch (_) {}
+
+      console.log('[WABLAS RESPONSE]', {
+        status: responseStatus,
+        statusText: pingRes.statusText,
+        endpoint: waEndpoint,
+        body: responseText ? responseText.substring(0, 1000) : '<empty>'
+      });
+
+      // Handle Wablas status codes
+      if (responseStatus === 200) {
+        if (responseJson && (responseJson.status === true || responseJson.status === 'success' || responseJson.data)) {
           return res.status(200).json({
             success: true,
-            status: true,
+            status: 200,
+            source: 'WABLAS',
             message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
-            device: pingData.data || pingData,
+            device: responseJson.data || responseJson,
             serverUrl: waServerUrl
           });
         } else {
-          const status = pingRes.status;
-          if (status === 401 || status === 403) {
-            return res.status(200).json({
-              success: false,
-              status: false,
-              message: `❌ Kunci API Wablas Tidak Valid (401 Unauthorized). Pastikan menyalin API Token dari dashboard Wablas (${waServerUrl}).`
-            });
-          }
+          const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Perangkat belum terhubung di Wablas';
           return res.status(200).json({
             success: false,
-            status: false,
-            message: `Koneksi Wablas menghasilkan status HTTP ${status}. Periksa kuota atau status perangkat di Wablas.`
+            source: 'WABLAS',
+            status: 200,
+            message: `❌ Wablas: ${errMsg}`
           });
         }
-      } catch (fetchErr: any) {
-        // Fallback validation if Wablas API domain has temporary timeout in container
-        if (token.length >= 8) {
-          return res.status(200).json({
-            success: true,
-            status: true,
-            message: `✅ Gateway WhatsApp Wablas Terkonfigurasi (${maskedToken}). Siap kirim pesan & notifikasi ke nomor ${targetPhone}.`
-          });
-        }
+      } else if (responseStatus === 401 || responseStatus === 403) {
+        const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Unauthorized';
         return res.status(200).json({
           success: false,
-          status: false,
-          message: `Koneksi ke gateway WhatsApp gagal: ${fetchErr?.message || 'Timeout'}`
+          source: 'WABLAS',
+          status: responseStatus,
+          message: `❌ Kunci API Wablas Tidak Valid (HTTP ${responseStatus}): ${errMsg}. Pastikan menyalin API Token yang benar dari dashboard Wablas (${waServerUrl}).`
+        });
+      } else if (responseStatus === 500) {
+        const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Internal Server Error pada server Wablas';
+        return res.status(200).json({
+          success: false,
+          source: 'WABLAS',
+          status: 500,
+          message: `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP 500: ${errMsg}`
+        });
+      } else {
+        const errMsg = responseJson?.message || responseJson?.msg || responseText || pingRes.statusText;
+        return res.status(200).json({
+          success: false,
+          source: 'WABLAS',
+          status: responseStatus,
+          message: `❌ Wablas mengembalikan status HTTP ${responseStatus}: ${errMsg}`
         });
       }
     } else {
-      // Provider: Fonnte or Generic
+      // Provider lain (Fonnte / Generic)
       return res.status(200).json({
         success: true,
-        status: true,
-        message: `✅ Gateway WhatsApp (${provider.toUpperCase()}) Aktif & Terverifikasi (${maskedToken}). Siap kirim pesan ke ${targetPhone}.`
+        status: 200,
+        source: 'INTERNAL_API',
+        message: `✅ Gateway WhatsApp (${provider.toUpperCase()}) Aktif & Terverifikasi (${maskedToken}). Siap kirim pesan ke ${sender}.`
       });
     }
   } catch (err: any) {
+    console.error('[WA TEST INTERNAL ERROR]', err);
     return res.status(200).json({
       success: false,
-      status: false,
-      message: `Error pengujian WhatsApp: ${err?.message || 'Unknown error'}`
+      source: 'INTERNAL_API',
+      status: 500,
+      message: `❌ Error internal server: ${err?.message || 'Unknown internal error'}`
     });
   }
 }
