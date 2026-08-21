@@ -400,9 +400,18 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     updatedAt: now,
   };
 
-  // 1. PRIMARY INSERT: Supabase PostgreSQL
-  const supabase = getSupabaseClient();
-  if (supabase) {
+  // 1. Instant Optimistic Local Cache Update (<1ms)
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    const list = cached ? JSON.parse(cached) : [];
+    list.unshift(cleanProduct);
+    localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+  } catch (_) {}
+
+  // 2. Parallel Synchronization with timeouts: Supabase (Primary) + Express + Firestore
+  const syncSupabase = async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
     try {
       const { error } = await upsertWithColumnFallback(supabase, 'products', [{
         id: cleanProduct.id,
@@ -434,31 +443,28 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     } catch (sbErr: any) {
       logSupabase('error', 'Exception addProduct Supabase:', sbErr);
     }
-  }
+  };
 
-  // 2. Express Server Broadcast (which also syncs backend stores)
-  try {
-    await fetch('/api/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cleanProduct),
-      signal: AbortSignal.timeout(3000)
-    });
-  } catch (e) {}
+  const syncExpress = async () => {
+    try {
+      await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanProduct),
+        signal: AbortSignal.timeout(3500)
+      });
+    } catch (_) {}
+  };
 
-  // 3. Firestore (optional secondary backup)
-  try {
-    const productsRef = collection(db, COLLECTIONS.PRODUCTS);
-    await addDoc(productsRef, cleanProduct);
-  } catch (error) {}
+  const syncFirestore = async () => {
+    try {
+      const productDocRef = doc(db, COLLECTIONS.PRODUCTS, cleanProduct.id);
+      await setDoc(productDocRef, cleanProduct, { merge: true });
+    } catch (_) {}
+  };
 
-  // Update local cache optimistically
-  try {
-    const cached = localStorage.getItem('sembako_cached_products');
-    const list = cached ? JSON.parse(cached) : [];
-    list.unshift(cleanProduct);
-    localStorage.setItem('sembako_cached_products', JSON.stringify(list));
-  } catch (_) {}
+  // Run in background / parallel so UI never freezes
+  await Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]);
 
   return id;
 }
@@ -470,9 +476,25 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
   const now = new Date().toISOString();
   const storeId = product.storeId || getCurrentStoreId();
 
-  // 1. PRIMARY UPDATE: Supabase
-  const supabase = getSupabaseClient();
-  if (supabase) {
+  // 1. Instant Optimistic Local Cache Update (<1ms)
+  let updatedItem: ProdukItem | null = null;
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    if (cached) {
+      const list = JSON.parse(cached);
+      const idx = list.findIndex((p: any) => p.id === id);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...product, updatedAt: now };
+        updatedItem = list[idx];
+        localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+      }
+    }
+  } catch (_) {}
+
+  // 2. Parallel Synchronization with timeouts: Supabase (Primary) + Express + Firestore
+  const syncSupabase = async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
     try {
       const sbUpdate: any = { updated_at: now };
       if (product.nama !== undefined) sbUpdate.nama = product.nama;
@@ -507,52 +529,35 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
     } catch (sbErr: any) {
       logSupabase('error', 'Exception updateProduct Supabase:', sbErr);
     }
-  }
+  };
 
-  // 2. Express API Update
-  try {
-    const currentList = await fetchProductsDirectRest(storeId);
-    const existing = currentList.find(p => p.id === id);
-    if (existing) {
-      const updated: ProdukItem = {
-        ...existing,
-        ...product,
-        updatedAt: now,
-      };
+  const syncExpress = async () => {
+    if (!updatedItem) return;
+    try {
       await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-        signal: AbortSignal.timeout(3000)
+        body: JSON.stringify(updatedItem),
+        signal: AbortSignal.timeout(3500)
       });
-    }
-  } catch (e) {}
+    } catch (_) {}
+  };
 
-  // 3. Firestore Update
-  try {
-    const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-    const updateData = {
-      ...product,
-      updatedAt: now,
-    };
-    Object.keys(updateData).forEach(
-      (key) => (updateData as any)[key] === undefined && delete (updateData as any)[key]
-    );
-    await setDoc(productRef, updateData, { merge: true });
-  } catch (error) {}
+  const syncFirestore = async () => {
+    try {
+      const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
+      const updateData = {
+        ...product,
+        updatedAt: now,
+      };
+      Object.keys(updateData).forEach(
+        (key) => (updateData as any)[key] === undefined && delete (updateData as any)[key]
+      );
+      await setDoc(productRef, updateData, { merge: true });
+    } catch (_) {}
+  };
 
-  // Update local cache
-  try {
-    const cached = localStorage.getItem('sembako_cached_products');
-    if (cached) {
-      const list = JSON.parse(cached);
-      const idx = list.findIndex((p: any) => p.id === id);
-      if (idx !== -1) {
-        list[idx] = { ...list[idx], ...product, updatedAt: now };
-        localStorage.setItem('sembako_cached_products', JSON.stringify(list));
-      }
-    }
-  } catch (_) {}
+  await Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]);
 }
 
 /**
@@ -561,9 +566,19 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
 export async function deleteProduct(id: string): Promise<void> {
   const storeId = getCurrentStoreId();
 
-  // 1. PRIMARY DELETE: Supabase
-  const supabase = getSupabaseClient();
-  if (supabase) {
+  // 1. Instant Optimistic Local Cache Update
+  try {
+    const cached = localStorage.getItem('sembako_cached_products');
+    if (cached) {
+      const list = JSON.parse(cached).filter((p: any) => p.id !== id);
+      localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+    }
+  } catch (_) {}
+
+  // 2. Parallel Deletion across Supabase + Express + Firestore
+  const deleteSupabase = async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
     try {
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) {
@@ -574,27 +589,22 @@ export async function deleteProduct(id: string): Promise<void> {
     } catch (sbErr: any) {
       logSupabase('error', 'Exception deleteProduct Supabase:', sbErr);
     }
-  }
+  };
 
-  // 2. Express Server Delete
-  try {
-    await fetch(`/api/products/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(3000) });
-  } catch (e) {}
+  const deleteExpress = async () => {
+    try {
+      await fetch(`/api/products/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(3000) });
+    } catch (_) {}
+  };
 
-  // 3. Firestore Delete
-  try {
-    const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-    await deleteDoc(productRef);
-  } catch (error) {}
+  const deleteFirestore = async () => {
+    try {
+      const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
+      await deleteDoc(productRef);
+    } catch (_) {}
+  };
 
-  // Update local cache
-  try {
-    const cached = localStorage.getItem('sembako_cached_products');
-    if (cached) {
-      const list = JSON.parse(cached).filter((p: any) => p.id !== id);
-      localStorage.setItem('sembako_cached_products', JSON.stringify(list));
-    }
-  } catch (_) {}
+  await Promise.allSettled([deleteSupabase(), deleteExpress(), deleteFirestore()]);
 }
 
 /**

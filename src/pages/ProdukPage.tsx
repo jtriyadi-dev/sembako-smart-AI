@@ -182,7 +182,7 @@ export const ProdukPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       await addProduct(productPayload);
-      success('Produk Ditambahkan', `Barang "${productPayload.nama}" berhasil disimpan ke Firestore.`);
+      success('Produk Ditambahkan', `Barang "${productPayload.nama}" berhasil disimpan ke Supabase Database.`);
       setIsAddModalOpen(false);
     } catch (err) {
       toastError('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan produk.');
@@ -196,7 +196,7 @@ export const ProdukPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       await updateProduct(editingProduct.id, productPayload);
-      success('Produk Diupdate', `Data barang "${productPayload.nama}" berhasil diperbarui.`);
+      success('Produk Diupdate', `Data barang "${productPayload.nama}" berhasil diperbarui di Supabase Database.`);
       setEditingProduct(null);
     } catch (err) {
       toastError('Gagal Update', 'Terjadi kesalahan saat mengupdate produk.');
@@ -209,7 +209,7 @@ export const ProdukPage: React.FC = () => {
     setIsDeleting(true);
     try {
       await deleteProduct(id);
-      success('Produk Dihapus', 'Data barang telah dihapus dari Firestore.');
+      success('Produk Dihapus', 'Data barang telah dihapus dari Supabase Database.');
       setDeletingProduct(null);
     } catch (err) {
       toastError('Gagal Hapus', 'Terjadi kesalahan saat menghapus produk.');

@@ -1118,9 +1118,37 @@ loadLocalProductsFromFile();
 
 // Get Supabase configuration if available
 export function getSupabaseConfigBackend(): { url: string; key: string } | null {
-  const url = (process.env.SUPABASE_URL || inMemoryApiKeys.supabaseUrl || '').trim().replace(/\/+$/, '');
-  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || inMemoryApiKeys.supabaseServiceRoleKey || inMemoryApiKeys.supabaseAnonKey || '').trim();
-  if (url && key && url.startsWith('https://')) {
+  let url = (
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    inMemoryApiKeys.supabaseUrl ||
+    ''
+  ).trim();
+
+  let key = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    inMemoryApiKeys.supabaseServiceRoleKey ||
+    inMemoryApiKeys.supabaseAnonKey ||
+    ''
+  ).trim();
+
+  if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
+    url = url.slice(1, -1).trim();
+  }
+  url = url.replace(/\/+$/, '');
+
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+  if (key.toLowerCase().startsWith('bearer ')) {
+    key = key.slice(7).trim();
+  }
+
+  if (url && key && url.startsWith('http')) {
     return { url, key };
   }
   return null;
@@ -1144,6 +1172,7 @@ export async function fetchProductsFromSupabaseBackend(): Promise<ProdukItem[]> 
     if (Array.isArray(rows) && rows.length > 0) {
       const mapped = rows.map((r: any) => ({
         id: String(r.id),
+        storeId: r.store_id || 'store_pusat_developer_sembako_smart_ai',
         kode: r.kode || `SKU-${String(r.id).substring(0, 5).toUpperCase()}`,
         barcode: r.barcode || '',
         nama: r.nama || 'Produk Sembako',
@@ -1157,6 +1186,7 @@ export async function fetchProductsFromSupabaseBackend(): Promise<ProdukItem[]> 
         deskripsi: r.deskripsi || '',
         expiredDate: r.expired_date || '',
         batchNo: r.batch_no || '',
+        supplierNama: r.supplier || '',
         terjual: Number(r.terjual) || 0,
         createdAt: r.created_at || new Date().toISOString(),
         updatedAt: r.updated_at || new Date().toISOString()
@@ -1189,27 +1219,29 @@ export async function syncProductToSupabaseBackend(p: ProdukItem): Promise<boole
   const sb = getSupabaseConfigBackend();
   if (!sb) return false;
   try {
-    const payload = {
-      id: p.id,
-      kode: p.kode,
+    const payload: any = {
+      id: String(p.id),
+      store_id: p.storeId || (p as any).store_id || 'store_pusat_developer_sembako_smart_ai',
+      kode: p.kode || `SKU-${String(p.id).substring(0, 5).toUpperCase()}`,
       barcode: p.barcode || null,
       nama: p.nama,
       kategori: p.kategori || 'Sembako Utama',
-      harga_beli: p.hargaBeli,
-      harga_jual: p.hargaJual,
-      stok: p.stok,
-      min_stok: p.minStok || 5,
+      harga_beli: Number(p.hargaBeli ?? (p as any).harga_beli) || 0,
+      harga_jual: Number(p.hargaJual ?? (p as any).harga_jual) || 0,
+      stok: Number(p.stok) || 0,
+      min_stok: Number(p.minStok ?? (p as any).min_stok) || 5,
       satuan: p.satuan || 'Pcs',
-      gambar_url: p.gambarUrl || null,
+      gambar_url: p.gambarUrl || (p as any).gambar_url || null,
       deskripsi: p.deskripsi || null,
-      expired_date: p.expiredDate || null,
-      batch_no: p.batchNo || null,
-      terjual: p.terjual || 0,
+      expired_date: p.expiredDate || (p as any).expired_date || null,
+      batch_no: p.batchNo || (p as any).batch_no || null,
+      supplier: p.supplierNama || (p as any).supplier || null,
+      terjual: Number(p.terjual) || 0,
       updated_at: p.updatedAt || new Date().toISOString(),
       created_at: p.createdAt || new Date().toISOString()
     };
 
-    const res = await fetch(`${sb.url}/rest/v1/products`, {
+    const res = await fetch(`${sb.url}/rest/v1/products?on_conflict=id`, {
       method: 'POST',
       headers: {
         apikey: sb.key,
@@ -1217,9 +1249,38 @@ export async function syncProductToSupabaseBackend(p: ProdukItem): Promise<boole
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates,return=representation'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4000)
     });
-    return res.ok;
+
+    if (res.ok) {
+      console.log(`[BackendStore] Product "${p.nama}" successfully upserted to Supabase!`);
+      return true;
+    }
+
+    const errText = await res.text().catch(() => '');
+    console.warn(`[BackendStore] Supabase product upsert returned ${res.status}: ${errText}`);
+
+    // If missing store_id or custom column, retry without store_id
+    if (errText.includes('store_id') || res.status === 400 || res.status === 404) {
+      delete payload.store_id;
+      const retryRes = await fetch(`${sb.url}/rest/v1/products?on_conflict=id`, {
+        method: 'POST',
+        headers: {
+          apikey: sb.key,
+          Authorization: `Bearer ${sb.key}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates,return=representation'
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(3000)
+      });
+      if (retryRes.ok) {
+        console.log(`[BackendStore] Product "${p.nama}" upserted on retry!`);
+        return true;
+      }
+    }
+    return false;
   } catch (err: any) {
     console.warn('[BackendStore Supabase Insert/Upsert Error]:', err?.message);
     return false;
@@ -1231,7 +1292,7 @@ export async function updateSupabaseProductStockBackend(productId: string, newSt
   const sb = getSupabaseConfigBackend();
   if (!sb) return false;
   try {
-    const res = await fetch(`${sb.url}/rest/v1/products?id=eq.${productId}`, {
+    const res = await fetch(`${sb.url}/rest/v1/products?id=eq.${encodeURIComponent(productId)}`, {
       method: 'PATCH',
       headers: {
         apikey: sb.key,
@@ -1242,9 +1303,24 @@ export async function updateSupabaseProductStockBackend(productId: string, newSt
       body: JSON.stringify({
         stok: newStock,
         updated_at: now
-      })
+      }),
+      signal: AbortSignal.timeout(3500)
     });
-    return res.ok;
+
+    if (res.ok) {
+      const data = await res.json().catch(() => []);
+      if (Array.isArray(data) && data.length > 0) {
+        console.log(`[BackendStore] Stock for product ${productId} updated in Supabase: ${newStock}`);
+        return true;
+      }
+    }
+
+    // If product wasn't in Supabase yet (0 rows patched), perform full product upsert
+    const localProd = inMemoryProducts.find(p => p.id === productId);
+    if (localProd) {
+      return await syncProductToSupabaseBackend({ ...localProd, stok: newStock, updatedAt: now });
+    }
+    return false;
   } catch (err: any) {
     console.warn('[BackendStore Supabase Stock Patch Error]:', err?.message);
     return false;
