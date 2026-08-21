@@ -87,6 +87,14 @@ export function sanitizeProduct(p: any, idx: number = 0): ProdukItem {
 
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff8081819f7e10ae019ff3f0ddfd2c42';
 
+// Helper to execute promises with a strict maximum timeout to prevent UI freezes
+export function promiseWithTimeout<T>(promise: Promise<T>, ms: number, fallbackValue?: any): Promise<T | any> {
+  return Promise.race([
+    promise,
+    new Promise<any>((resolve) => setTimeout(() => resolve(fallbackValue), ms))
+  ]);
+}
+
 /**
  * Fetch products from Supabase (Source of Truth) with fallback hierarchy
  */
@@ -249,16 +257,31 @@ export function subscribeProducts(
   let isUnsubscribed = false;
   const storeId = getCurrentStoreId();
 
-  // 1. Instant Cache Call (<10ms)
-  try {
-    const cached = localStorage.getItem('sembako_cached_products');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        onData(parsed.map(sanitizeProduct));
+  // Helper to emit latest cache
+  const emitCache = () => {
+    try {
+      const cached = localStorage.getItem('sembako_cached_products');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          onData(parsed.map(sanitizeProduct));
+        }
       }
+    } catch (e) {}
+  };
+
+  // 1. Instant Cache Call (<10ms)
+  emitCache();
+
+  // Local event listener for instant UI re-render when product added/edited/deleted
+  const handleLocalUpdate = () => {
+    if (!isUnsubscribed) {
+      emitCache();
     }
-  } catch (e) {}
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('sembako_products_updated', handleLocalUpdate);
+  }
 
   // 2. Initial Fetch from Supabase (Source of Truth)
   fetchProductsDirectRest(storeId).then((prods) => {
@@ -313,6 +336,9 @@ export function subscribeProducts(
   return () => {
     isUnsubscribed = true;
     clearInterval(pollInterval);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('sembako_products_updated', handleLocalUpdate);
+    }
     try { unsubscribeRealtime(); } catch (_) {}
     try { unsubscribeFirestore(); } catch (_) {}
   };
@@ -406,6 +432,9 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
     const list = cached ? JSON.parse(cached) : [];
     list.unshift(cleanProduct);
     localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('sembako_products_updated'));
+    }
   } catch (_) {}
 
   // 2. Parallel Synchronization with timeouts: Supabase (Primary) + Express + Firestore
@@ -451,7 +480,7 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cleanProduct),
-        signal: AbortSignal.timeout(3500)
+        signal: AbortSignal.timeout(2500)
       });
     } catch (_) {}
   };
@@ -459,12 +488,16 @@ export async function addProduct(product: Omit<ProdukItem, 'id'>): Promise<strin
   const syncFirestore = async () => {
     try {
       const productDocRef = doc(db, COLLECTIONS.PRODUCTS, cleanProduct.id);
-      await setDoc(productDocRef, cleanProduct, { merge: true });
+      await promiseWithTimeout(setDoc(productDocRef, cleanProduct, { merge: true }), 1500, null);
     } catch (_) {}
   };
 
-  // Run in background / parallel so UI never freezes
-  await Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]);
+  // Run in background / parallel with a quick 700ms cap so the modal closes instantly
+  await promiseWithTimeout(
+    Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]),
+    700,
+    []
+  );
 
   return id;
 }
@@ -487,6 +520,9 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
         list[idx] = { ...list[idx], ...product, updatedAt: now };
         updatedItem = list[idx];
         localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('sembako_products_updated'));
+        }
       }
     }
   } catch (_) {}
@@ -538,7 +574,7 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedItem),
-        signal: AbortSignal.timeout(3500)
+        signal: AbortSignal.timeout(2500)
       });
     } catch (_) {}
   };
@@ -553,11 +589,15 @@ export async function updateProduct(id: string, product: Partial<ProdukItem>): P
       Object.keys(updateData).forEach(
         (key) => (updateData as any)[key] === undefined && delete (updateData as any)[key]
       );
-      await setDoc(productRef, updateData, { merge: true });
+      await promiseWithTimeout(setDoc(productRef, updateData, { merge: true }), 1500, null);
     } catch (_) {}
   };
 
-  await Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]);
+  await promiseWithTimeout(
+    Promise.allSettled([syncSupabase(), syncExpress(), syncFirestore()]),
+    700,
+    []
+  );
 }
 
 /**
@@ -572,6 +612,9 @@ export async function deleteProduct(id: string): Promise<void> {
     if (cached) {
       const list = JSON.parse(cached).filter((p: any) => p.id !== id);
       localStorage.setItem('sembako_cached_products', JSON.stringify(list));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('sembako_products_updated'));
+      }
     }
   } catch (_) {}
 
@@ -593,18 +636,22 @@ export async function deleteProduct(id: string): Promise<void> {
 
   const deleteExpress = async () => {
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(3000) });
+      await fetch(`/api/products/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(2000) });
     } catch (_) {}
   };
 
   const deleteFirestore = async () => {
     try {
       const productRef = doc(db, COLLECTIONS.PRODUCTS, id);
-      await deleteDoc(productRef);
+      await promiseWithTimeout(deleteDoc(productRef), 1500, null);
     } catch (_) {}
   };
 
-  await Promise.allSettled([deleteSupabase(), deleteExpress(), deleteFirestore()]);
+  await promiseWithTimeout(
+    Promise.allSettled([deleteSupabase(), deleteExpress(), deleteFirestore()]),
+    700,
+    []
+  );
 }
 
 /**
