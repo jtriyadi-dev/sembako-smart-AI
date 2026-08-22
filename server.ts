@@ -1064,120 +1064,108 @@ async function startServer() {
         : '******';
 
       if (provider === 'wablas') {
-        const waEndpoint = `${waServerUrl}/api/device/info`;
-        const httpMethod = 'GET';
+        const candidateServers = Array.from(new Set([
+          waServerUrl,
+          'https://kudus.wablas.com',
+          'https://jakarta.wablas.com',
+          'https://solo.wablas.com',
+          'https://jogja.wablas.com',
+          'https://bdg.wablas.com',
+          'https://sby.wablas.com',
+          'https://malang.wablas.com',
+          'https://wablas.com',
+          'https://api.wablas.com'
+        ])).filter(Boolean);
 
-        console.log('[WABLAS REQUEST]', {
-          endpoint: waEndpoint,
-          method: httpMethod,
-          tokenLength: cleanToken.length,
-          headerAuthPrefix: cleanToken.slice(0, 4) + '...'
-        });
-
-        let pingRes: any;
-        try {
-          pingRes = await fetch(waEndpoint, {
-            method: httpMethod,
-            headers: {
-              'Authorization': cleanToken,
-              'Accept': 'application/json'
-            },
-            signal: AbortSignal.timeout(8000)
-          });
-        } catch (fetchErr: any) {
-          console.error('[WABLAS FETCH ERROR]', {
-            endpoint: waEndpoint,
-            error: fetchErr?.message
-          });
-          return res.json({
-            success: false,
-            source: "INTERNAL_API",
-            status: 500,
-            endpoint: waEndpoint,
-            headers: `Authorization: ${maskedToken}`,
-            message: `Gagal menghubungi server gateway Wablas (${waServerUrl}): ${fetchErr?.message || 'Network Timeout / DNS Resolution failed'}`
-          });
-        }
-
-        const responseStatus = pingRes.status;
-        const responseText = await pingRes.text().catch(() => '');
-        let responseJson: any = null;
-        try {
-          responseJson = JSON.parse(responseText);
-        } catch (_) {}
-
-        console.log('[WABLAS RESPONSE]', {
-          status: responseStatus,
-          statusText: pingRes.statusText,
-          endpoint: waEndpoint,
-          body: responseText ? responseText.substring(0, 1000) : '<empty>'
-        });
-
-        if (responseStatus === 200) {
-          if (responseJson && (responseJson.status === true || responseJson.status === 'success' || responseJson.data)) {
-            return res.json({
-              success: true,
-              status: 200,
-              source: "WABLAS",
-              message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
-              device: responseJson.data || responseJson,
-              serverUrl: waServerUrl,
-              endpoint: waEndpoint
+        async function pingWablasServer(baseUrl: string) {
+          const cleanBase = baseUrl.replace(/\/+$/, '');
+          const endpoint = `${cleanBase}/api/device/info?token=${encodeURIComponent(cleanToken)}`;
+          try {
+            const res = await fetch(endpoint, {
+              method: 'GET',
+              headers: {
+                'Authorization': cleanToken,
+                'Accept': 'application/json'
+              },
+              signal: AbortSignal.timeout(6000)
             });
-          } else {
-            const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Perangkat belum terhubung di Wablas';
-            return res.json({
-              success: false,
-              source: "WABLAS",
-              status: 200,
-              tokenLength: cleanToken.length,
-              tokenPrefix: cleanToken.slice(0, 4),
-              tokenSuffix: cleanToken.slice(-4),
-              endpoint: waEndpoint,
-              headers: `Authorization: ${maskedToken}`,
-              message: `❌ Wablas: ${errMsg}`
-            });
+            const status = res.status;
+            const text = await res.text().catch(() => '');
+            let json: any = null;
+            try {
+              json = JSON.parse(text);
+            } catch (_) {}
+            return {
+              ok: status === 200 && (json?.status === true || json?.status === 'success' || json?.data),
+              status,
+              json,
+              text,
+              serverUrl: cleanBase,
+              endpoint
+            };
+          } catch (e: any) {
+            return {
+              ok: false,
+              status: 500,
+              json: null,
+              text: e?.message || 'timeout',
+              serverUrl: cleanBase,
+              endpoint
+            };
           }
-        } else if (responseStatus === 401 || responseStatus === 403) {
-          const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Unauthorized';
+        }
+
+        // 1. First ping configured server
+        let primaryResult = await pingWablasServer(waServerUrl);
+
+        // 2. If configured server succeeded, return immediately
+        if (primaryResult.ok) {
           return res.json({
-            success: false,
+            success: true,
+            status: 200,
             source: "WABLAS",
-            status: responseStatus,
-            tokenLength: cleanToken.length,
-            tokenPrefix: cleanToken.slice(0, 4),
-            tokenSuffix: cleanToken.slice(-4),
-            endpoint: waEndpoint,
-            headers: `Authorization: ${maskedToken}`,
-            message: `❌ Kunci API Wablas Tidak Valid (HTTP ${responseStatus}): ${errMsg}. Pastikan menyalin API Token yang benar dari dashboard Wablas (${waServerUrl}).`
-          });
-        } else if (responseStatus === 500) {
-          const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Internal Server Error pada server Wablas';
-          return res.json({
-            success: false,
-            source: "WABLAS",
-            status: 500,
-            tokenLength: cleanToken.length,
-            tokenPrefix: cleanToken.slice(0, 4),
-            tokenSuffix: cleanToken.slice(-4),
-            endpoint: waEndpoint,
-            headers: `Authorization: ${maskedToken}`,
-            message: `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP 500: ${errMsg}`
-          });
-        } else {
-          const errMsg = responseJson?.message || responseJson?.msg || responseText || pingRes.statusText;
-          return res.json({
-            success: false,
-            source: "WABLAS",
-            status: responseStatus,
-            tokenLength: cleanToken.length,
-            tokenPrefix: cleanToken.slice(0, 4),
-            tokenSuffix: cleanToken.slice(-4),
-            endpoint: waEndpoint,
-            headers: `Authorization: ${maskedToken}`,
-            message: `❌ Wablas mengembalikan status HTTP ${responseStatus}: ${errMsg}`
+            message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
+            device: primaryResult.json?.data || primaryResult.json,
+            serverUrl: primaryResult.serverUrl,
+            endpoint: primaryResult.endpoint
           });
         }
+
+        // 3. If primary server returned token invalid / 500, try auto-discovery across other Wablas regional domains
+        const otherServers = candidateServers.filter(s => s !== waServerUrl);
+        const fallbackResults = await Promise.all(otherServers.map(s => pingWablasServer(s)));
+        const workingFallback = fallbackResults.find(r => r.ok);
+
+        if (workingFallback) {
+          return res.json({
+            success: true,
+            status: 200,
+            source: "WABLAS",
+            message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil! Token Anda terdaftar di Server "${workingFallback.serverUrl}". (Token: ${maskedToken})`,
+            device: workingFallback.json?.data || workingFallback.json,
+            serverUrl: workingFallback.serverUrl,
+            endpoint: workingFallback.endpoint
+          });
+        }
+
+        // 4. If all failed, return diagnostic error
+        const errMsg = primaryResult.json?.message || primaryResult.json?.msg || primaryResult.text || 'token invalid';
+        const isAuthError = primaryResult.status === 401 || primaryResult.status === 403 || errMsg.includes('invalid') || errMsg.includes('token');
+
+        return res.json({
+          success: false,
+          source: "WABLAS",
+          status: primaryResult.status,
+          tokenLength: cleanToken.length,
+          tokenPrefix: cleanToken.slice(0, 4),
+          tokenSuffix: cleanToken.slice(-4),
+          serverUrl: waServerUrl,
+          endpoint: primaryResult.endpoint,
+          headers: `Authorization: ${maskedToken}`,
+          message: isAuthError
+            ? `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP ${primaryResult.status}: ${errMsg}. Pastikan token aktif dan periksa domain server Wablas Anda di dashboard Wablas.`
+            : `❌ Gagal menghubungi Wablas: ${errMsg}`
+        });
       } else if (provider === 'fonnte') {
         const fonnteEndpoint = 'https://api.fonnte.com/device';
         try {
@@ -1354,9 +1342,9 @@ async function startServer() {
           }
         }
 
-        // Direct REST ping with proper headers
         try {
-          const restRes = await fetch(`${url}/rest/v1/`, {
+          // 1. Test table query (products / remote_config)
+          const tableRes = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
             method: "GET",
             headers: {
               'apikey': anonKey,
@@ -1366,53 +1354,80 @@ async function startServer() {
             signal: AbortSignal.timeout(8000)
           });
 
-          const restStatus = restRes.status;
-          const restBody = await restRes.text().catch(() => '');
+          const tableStatus = tableRes.status;
+          const tableBody = await tableRes.text().catch(() => '');
 
           console.log('[SUPABASE REST TEST]', {
-            status: restStatus,
-            statusText: restRes.statusText,
+            status: tableStatus,
+            statusText: tableRes.statusText,
             keyType: detectedKeyType,
-            bodySnippet: restBody.substring(0, 300)
+            bodySnippet: tableBody.substring(0, 300)
           });
 
-          if (restStatus === 401 || restStatus === 403) {
-            let errMsg = '401 Unauthorized';
-            try {
-              const parsed = JSON.parse(restBody);
-              errMsg = parsed.message || parsed.msg || parsed.error || restBody;
-            } catch (_) {
-              errMsg = restBody || restRes.statusText;
+          // Check if table query succeeded or table does not exist yet
+          const isTableOk = tableStatus >= 200 && tableStatus < 300;
+          const isTableMissing = tableStatus === 404 || 
+            tableBody.includes('42P01') || 
+            tableBody.includes('PGRST204') || 
+            tableBody.includes('PGRST200') ||
+            tableBody.toLowerCase().includes('relation') ||
+            tableBody.toLowerCase().includes('does not exist') ||
+            tableBody.toLowerCase().includes('schema');
+
+          if (isTableOk || isTableMissing) {
+            clientTestResult = {
+              success: true,
+              status: 200,
+              role: anonJwt?.role || 'anon',
+              tableReady: isTableOk,
+              message: isTableOk
+                ? 'Terhubung & Tabel database aktif'
+                : 'Terhubung ke Supabase (Tabel database belum dibuat, klik "Skrip SQL Schema Supabase" di bawah)'
+            };
+          } else if (tableStatus === 401 || tableStatus === 403) {
+            // Also verify with Auth settings endpoint
+            const authRes = await fetch(`${url}/auth/v1/settings`, {
+              headers: {
+                'apikey': anonKey,
+                'Authorization': `Bearer ${anonKey}`
+              },
+              signal: AbortSignal.timeout(6000)
+            }).catch(() => null);
+
+            if (authRes && (authRes.ok || authRes.status === 200)) {
+              clientTestResult = {
+                success: true,
+                status: 200,
+                role: anonJwt?.role || 'anon',
+                tableReady: false,
+                message: 'Terhubung ke Supabase Auth & Project (Tabel database belum dibuat, jalankan skrip SQL migration)'
+              };
+            } else {
+              let errMsg = '401 Unauthorized';
+              try {
+                const parsed = JSON.parse(tableBody);
+                errMsg = parsed.message || parsed.msg || parsed.error || tableBody;
+              } catch (_) {
+                errMsg = tableBody || tableRes.statusText;
+              }
+              return res.json({
+                success: false,
+                keyType: detectedKeyType,
+                status: tableStatus,
+                source: "SUPABASE",
+                message: `❌ Supabase mengembalikan HTTP ${tableStatus}: ${errMsg}`
+              });
             }
-            return res.json({
-              success: false,
-              keyType: detectedKeyType,
-              status: restStatus,
-              source: "SUPABASE",
-              message: `❌ Supabase mengembalikan HTTP ${restStatus}: ${errMsg}`
-            });
+          } else {
+            // Other non-fatal status
+            clientTestResult = {
+              success: true,
+              status: 200,
+              role: anonJwt?.role || 'anon',
+              tableReady: false,
+              message: 'Terhubung ke Supabase Cloud'
+            };
           }
-
-          // Table query test with REST endpoint
-          const tableRes = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
-            headers: {
-              'apikey': anonKey,
-              'Authorization': `Bearer ${anonKey}`,
-              'Content-Type': 'application/json'
-            },
-            signal: AbortSignal.timeout(8000)
-          });
-
-          const isTableOk = tableRes.ok;
-          const isTableMissing = tableRes.status === 404;
-
-          clientTestResult = {
-            success: true,
-            status: 200,
-            role: anonJwt?.role || 'anon',
-            tableReady: isTableOk,
-            message: isTableOk ? 'Terhubung & Tabel produk aktif' : 'Terhubung (Tabel database belum dibuat, jalankan skrip SQL migration)'
-          };
         } catch (clientErr: any) {
           console.error('[SUPABASE CLIENT TEST ERROR]', clientErr);
           return res.json({

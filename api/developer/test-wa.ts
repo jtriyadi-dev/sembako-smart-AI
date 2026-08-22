@@ -102,121 +102,108 @@ export default async function handler(req: any, res: any) {
       : '******';
 
     if (provider === 'wablas') {
-      const waEndpoint = `${waServerUrl}/api/device/info`;
-      const httpMethod = 'GET';
+      const candidateServers = Array.from(new Set([
+        waServerUrl,
+        'https://kudus.wablas.com',
+        'https://jakarta.wablas.com',
+        'https://solo.wablas.com',
+        'https://jogja.wablas.com',
+        'https://bdg.wablas.com',
+        'https://sby.wablas.com',
+        'https://malang.wablas.com',
+        'https://wablas.com',
+        'https://api.wablas.com'
+      ])).filter(Boolean);
 
-      console.log('[WABLAS REQUEST]', {
-        endpoint: waEndpoint,
-        method: httpMethod,
-        tokenLength: cleanToken.length,
-        headerAuthPrefix: cleanToken.slice(0, 4) + '...'
-      });
-
-      let pingRes: Response;
-      try {
-        pingRes = await fetch(waEndpoint, {
-          method: httpMethod,
-          headers: {
-            'Authorization': cleanToken,
-            'Accept': 'application/json'
-          },
-          signal: AbortSignal.timeout(8000)
-        });
-      } catch (fetchErr: any) {
-        console.error('[WABLAS FETCH ERROR]', {
-          endpoint: waEndpoint,
-          error: fetchErr?.message
-        });
-        return res.status(200).json({
-          success: false,
-          source: 'INTERNAL_API',
-          status: 500,
-          endpoint: waEndpoint,
-          headers: `Authorization: ${maskedToken}`,
-          message: `Gagal menghubungi server gateway Wablas (${waServerUrl}): ${fetchErr?.message || 'Network Timeout / DNS Resolution failed'}`
-        });
-      }
-
-      const responseStatus = pingRes.status;
-      const responseText = await pingRes.text().catch(() => '');
-      let responseJson: any = null;
-      try {
-        responseJson = JSON.parse(responseText);
-      } catch (_) {}
-
-      console.log('[WABLAS RESPONSE]', {
-        status: responseStatus,
-        statusText: pingRes.statusText,
-        endpoint: waEndpoint,
-        body: responseText ? responseText.substring(0, 1000) : '<empty>'
-      });
-
-      // Handle Wablas status codes
-      if (responseStatus === 200) {
-        if (responseJson && (responseJson.status === true || responseJson.status === 'success' || responseJson.data)) {
-          return res.status(200).json({
-            success: true,
-            status: 200,
-            source: 'WABLAS',
-            message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
-            device: responseJson.data || responseJson,
-            serverUrl: waServerUrl,
-            endpoint: waEndpoint
+      async function pingWablasServer(baseUrl: string) {
+        const cleanBase = baseUrl.replace(/\/+$/, '');
+        const endpoint = `${cleanBase}/api/device/info?token=${encodeURIComponent(cleanToken)}`;
+        try {
+          const res = await fetch(endpoint, {
+            method: 'GET',
+            headers: {
+              'Authorization': cleanToken,
+              'Accept': 'application/json'
+            },
+            signal: AbortSignal.timeout(6000)
           });
-        } else {
-          const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Perangkat belum terhubung di Wablas';
-          return res.status(200).json({
-            success: false,
-            source: 'WABLAS',
-            status: 200,
-            tokenLength: cleanToken.length,
-            tokenPrefix: cleanToken.slice(0, 4),
-            tokenSuffix: cleanToken.slice(-4),
-            endpoint: waEndpoint,
-            headers: `Authorization: ${maskedToken}`,
-            message: `❌ Wablas: ${errMsg}`
-          });
+          const status = res.status;
+          const text = await res.text().catch(() => '');
+          let json: any = null;
+          try {
+            json = JSON.parse(text);
+          } catch (_) {}
+          return {
+            ok: status === 200 && (json?.status === true || json?.status === 'success' || json?.data),
+            status,
+            json,
+            text,
+            serverUrl: cleanBase,
+            endpoint
+          };
+        } catch (e: any) {
+          return {
+            ok: false,
+            status: 500,
+            json: null,
+            text: e?.message || 'timeout',
+            serverUrl: cleanBase,
+            endpoint
+          };
         }
-      } else if (responseStatus === 401 || responseStatus === 403) {
-        const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Unauthorized';
+      }
+
+      // 1. First ping configured server
+      let primaryResult = await pingWablasServer(waServerUrl);
+
+      // 2. If configured server succeeded, return immediately
+      if (primaryResult.ok) {
         return res.status(200).json({
-          success: false,
+          success: true,
+          status: 200,
           source: 'WABLAS',
-          status: responseStatus,
-          tokenLength: cleanToken.length,
-          tokenPrefix: cleanToken.slice(0, 4),
-          tokenSuffix: cleanToken.slice(-4),
-          endpoint: waEndpoint,
-          headers: `Authorization: ${maskedToken}`,
-          message: `❌ Kunci API Wablas Tidak Valid (HTTP ${responseStatus}): ${errMsg}. Pastikan menyalin API Token yang benar dari dashboard Wablas (${waServerUrl}).`
-        });
-      } else if (responseStatus === 500) {
-        const errMsg = responseJson?.message || responseJson?.msg || responseText || 'Internal Server Error pada server Wablas';
-        return res.status(200).json({
-          success: false,
-          source: 'WABLAS',
-          status: 500,
-          tokenLength: cleanToken.length,
-          tokenPrefix: cleanToken.slice(0, 4),
-          tokenSuffix: cleanToken.slice(-4),
-          endpoint: waEndpoint,
-          headers: `Authorization: ${maskedToken}`,
-          message: `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP 500: ${errMsg}`
-        });
-      } else {
-        const errMsg = responseJson?.message || responseJson?.msg || responseText || pingRes.statusText;
-        return res.status(200).json({
-          success: false,
-          source: 'WABLAS',
-          status: responseStatus,
-          tokenLength: cleanToken.length,
-          tokenPrefix: cleanToken.slice(0, 4),
-          tokenSuffix: cleanToken.slice(-4),
-          endpoint: waEndpoint,
-          headers: `Authorization: ${maskedToken}`,
-          message: `❌ Wablas mengembalikan status HTTP ${responseStatus}: ${errMsg}`
+          message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil & Perangkat Terhubung! (Token: ${maskedToken})`,
+          device: primaryResult.json?.data || primaryResult.json,
+          serverUrl: primaryResult.serverUrl,
+          endpoint: primaryResult.endpoint
         });
       }
+
+      // 3. If primary server returned token invalid / 500, try auto-discovery across other Wablas regional domains
+      const otherServers = candidateServers.filter(s => s !== waServerUrl);
+      const fallbackResults = await Promise.all(otherServers.map(s => pingWablasServer(s)));
+      const workingFallback = fallbackResults.find(r => r.ok);
+
+      if (workingFallback) {
+        return res.status(200).json({
+          success: true,
+          status: 200,
+          source: 'WABLAS',
+          message: `✅ Koneksi Gateway WhatsApp Wablas Berhasil! Token Anda terdaftar di Server "${workingFallback.serverUrl}". (Token: ${maskedToken})`,
+          device: workingFallback.json?.data || workingFallback.json,
+          serverUrl: workingFallback.serverUrl,
+          endpoint: workingFallback.endpoint
+        });
+      }
+
+      // 4. If all failed, return diagnostic error
+      const errMsg = primaryResult.json?.message || primaryResult.json?.msg || primaryResult.text || 'token invalid';
+      const isAuthError = primaryResult.status === 401 || primaryResult.status === 403 || errMsg.includes('invalid') || errMsg.includes('token');
+
+      return res.status(200).json({
+        success: false,
+        source: 'WABLAS',
+        status: primaryResult.status,
+        tokenLength: cleanToken.length,
+        tokenPrefix: cleanToken.slice(0, 4),
+        tokenSuffix: cleanToken.slice(-4),
+        serverUrl: waServerUrl,
+        endpoint: primaryResult.endpoint,
+        headers: `Authorization: ${maskedToken}`,
+        message: isAuthError
+          ? `❌ Server Wablas (${waServerUrl}) mengembalikan HTTP ${primaryResult.status}: ${errMsg}. Pastikan token aktif dan periksa domain server Wablas Anda di dashboard Wablas.`
+          : `❌ Gagal menghubungi Wablas: ${errMsg}`
+      });
     } else if (provider === 'fonnte') {
       const fonnteEndpoint = 'https://api.fonnte.com/device';
       try {

@@ -115,6 +115,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
   const [waProviderInput, setWaProviderInput] = useState(apiKeys.waGatewayProvider || 'fonnte');
   const [waApiKeyInput, setWaApiKeyInput] = useState(apiKeys.waApiKey || '');
   const [waSenderInput, setWaSenderInput] = useState(apiKeys.waSenderNumber || '');
+  const [waServerUrlInput, setWaServerUrlInput] = useState(apiKeys.waServerUrl || 'https://kudus.wablas.com');
   const [supabaseUrlInput, setSupabaseUrlInput] = useState(apiKeys.supabaseUrl || '');
   const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState(apiKeys.supabaseAnonKey || '');
   const [supabaseServiceRoleKeyInput, setSupabaseServiceRoleKeyInput] = useState(apiKeys.supabaseServiceRoleKey || '');
@@ -225,6 +226,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
       setWaApiKeyInput(apiKeys.waApiKey || '');
       setWaSenderInput(apiKeys.waSenderNumber || '');
       setWaProviderInput(apiKeys.waGatewayProvider || 'fonnte');
+      setWaServerUrlInput(apiKeys.waServerUrl || 'https://kudus.wablas.com');
       setSupabaseUrlInput(apiKeys.supabaseUrl || '');
       setSupabaseAnonKeyInput(apiKeys.supabaseAnonKey || '');
       setSupabaseServiceRoleKeyInput(apiKeys.supabaseServiceRoleKey || '');
@@ -370,10 +372,13 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
         provider: waProviderInput,
         token: cleanToken,
         targetPhone: (waSenderInput || '081234567890').trim(),
-        waServerUrl: (apiKeys.waServerUrl || 'https://kudus.wablas.com').trim(),
+        waServerUrl: (waServerUrlInput || 'https://kudus.wablas.com').trim(),
       });
       setWaTestResult(res);
       if (res.success) {
+        if (res.serverUrl && res.serverUrl !== waServerUrlInput) {
+          setWaServerUrlInput(res.serverUrl);
+        }
         success('WhatsApp Gateway Terhubung', res.message);
       } else {
         warning('Uji Gateway Gagal', res.message);
@@ -450,6 +455,7 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
         waGatewayProvider: waProviderInput as any,
         waApiKey: (waApiKeyInput || '').trim(),
         waSenderNumber: (waSenderInput || '').trim(),
+        waServerUrl: (waServerUrlInput || 'https://kudus.wablas.com').trim(),
         supabaseUrl: cleanUrl,
         supabaseAnonKey: cleanKey,
         supabaseServiceRoleKey: (supabaseServiceRoleKeyInput || '').trim(),
@@ -2014,6 +2020,49 @@ export const ControlPanelPage: React.FC<ControlPanelPageProps> = ({ onNavigate }
                   className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
                 />
               </div>
+
+              {waProviderInput === 'wablas' && (
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Domain Server Wilayah Wablas
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <select
+                      value={
+                        ['https://kudus.wablas.com', 'https://jakarta.wablas.com', 'https://solo.wablas.com', 'https://jogja.wablas.com', 'https://bdg.wablas.com', 'https://sby.wablas.com', 'https://malang.wablas.com', 'https://wablas.com'].includes(waServerUrlInput)
+                          ? waServerUrlInput
+                          : 'custom'
+                      }
+                      onChange={(e) => {
+                        if (e.target.value !== 'custom') {
+                          setWaServerUrlInput(e.target.value);
+                        }
+                      }}
+                      className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white"
+                    >
+                      <option value="https://kudus.wablas.com">Server Kudus (https://kudus.wablas.com)</option>
+                      <option value="https://jakarta.wablas.com">Server Jakarta (https://jakarta.wablas.com)</option>
+                      <option value="https://solo.wablas.com">Server Solo (https://solo.wablas.com)</option>
+                      <option value="https://jogja.wablas.com">Server Yogyakarta (https://jogja.wablas.com)</option>
+                      <option value="https://bdg.wablas.com">Server Bandung (https://bdg.wablas.com)</option>
+                      <option value="https://sby.wablas.com">Server Surabaya (https://sby.wablas.com)</option>
+                      <option value="https://malang.wablas.com">Server Malang (https://malang.wablas.com)</option>
+                      <option value="https://wablas.com">Server Global (https://wablas.com)</option>
+                      <option value="custom">Custom Server URL...</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={waServerUrlInput}
+                      onChange={(e) => setWaServerUrlInput(e.target.value)}
+                      placeholder="https://kudus.wablas.com"
+                      className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    🌐 Sesuaikan dengan domain server Wablas yang tampil di dashboard akun Wablas Anda (misal: <code>https://jakarta.wablas.com</code> atau <code>https://kudus.wablas.com</code>).
+                  </p>
+                </div>
+              )}
 
               <div className="md:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">

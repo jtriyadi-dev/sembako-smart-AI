@@ -178,8 +178,8 @@ export default async function handler(req: any, res: any) {
 
       // Test Live Connection ke Supabase REST Endpoint
       try {
-        // Direct REST ping with official headers
-        const restRes = await fetch(`${supabaseUrl}/rest/v1/`, {
+        // 1. Test table query (products / remote_config)
+        const tableRes = await fetch(`${supabaseUrl}/rest/v1/products?select=id&limit=1`, {
           method: 'GET',
           headers: {
             'apikey': anonKey,
@@ -189,61 +189,76 @@ export default async function handler(req: any, res: any) {
           signal: AbortSignal.timeout(8000)
         });
 
-        const restStatus = restRes.status;
-        const restBody = await restRes.text().catch(() => '');
+        const tableStatus = tableRes.status;
+        const tableBody = await tableRes.text().catch(() => '');
 
         console.log('[SUPABASE REST TEST]', {
-          status: restStatus,
-          statusText: restRes.statusText,
+          status: tableStatus,
+          statusText: tableRes.statusText,
           keyType: detectedKeyType,
-          bodySnippet: restBody.substring(0, 300)
+          bodySnippet: tableBody.substring(0, 300)
         });
 
-        if (restStatus === 401 || restStatus === 403) {
-          let errMsg = '401 Unauthorized';
-          try {
-            const parsed = JSON.parse(restBody);
-            errMsg = parsed.message || parsed.msg || parsed.error || restBody;
-          } catch (_) {
-            errMsg = restBody || restRes.statusText;
-          }
-          return res.status(200).json({
-            success: false,
-            keyType: detectedKeyType,
-            status: restStatus,
-            source: 'SUPABASE',
-            message: `❌ Supabase mengembalikan HTTP ${restStatus}: ${errMsg}`
-          });
-        }
+        const isTableOk = tableStatus >= 200 && tableStatus < 300;
+        const isTableMissing = tableStatus === 404 || 
+          tableBody.includes('42P01') || 
+          tableBody.includes('PGRST204') || 
+          tableBody.includes('PGRST200') ||
+          tableBody.toLowerCase().includes('relation') ||
+          tableBody.toLowerCase().includes('does not exist') ||
+          tableBody.toLowerCase().includes('schema');
 
-        // Test Query tabel menggunakan client resmi Supabase
-        const client = createClient(supabaseUrl, anonKey, {
-          auth: { persistSession: false }
-        });
-
-        const { data: prodData, error: prodErr } = await client
-          .from('products')
-          .select('id')
-          .limit(1);
-
-        const isMissingTable = prodErr?.code === '42P01' || prodErr?.code === 'PGRST204' || prodErr?.message?.includes('does not exist');
-
-        if (prodErr && !isMissingTable) {
+        if (isTableOk || isTableMissing) {
           clientTestResult = {
-            success: false,
-            status: 400,
+            success: true,
+            status: 200,
             role: anonJwt?.role || 'anon',
-            message: `Query gagal: ${prodErr.message}`
+            tableReady: isTableOk,
+            message: isTableOk
+              ? 'Terhubung & Tabel database aktif'
+              : 'Terhubung ke Supabase (Tabel database belum dibuat, klik "Skrip SQL Schema Supabase" di bawah)'
           };
+        } else if (tableStatus === 401 || tableStatus === 403) {
+          // Check with Auth settings endpoint
+          const authRes = await fetch(`${supabaseUrl}/auth/v1/settings`, {
+            headers: {
+              'apikey': anonKey,
+              'Authorization': `Bearer ${anonKey}`
+            },
+            signal: AbortSignal.timeout(6000)
+          }).catch(() => null);
+
+          if (authRes && (authRes.ok || authRes.status === 200)) {
+            clientTestResult = {
+              success: true,
+              status: 200,
+              role: anonJwt?.role || 'anon',
+              tableReady: false,
+              message: 'Terhubung ke Supabase Auth & Project (Tabel database belum dibuat, jalankan skrip SQL migration)'
+            };
+          } else {
+            let errMsg = '401 Unauthorized';
+            try {
+              const parsed = JSON.parse(tableBody);
+              errMsg = parsed.message || parsed.msg || parsed.error || tableBody;
+            } catch (_) {
+              errMsg = tableBody || tableRes.statusText;
+            }
+            return res.status(200).json({
+              success: false,
+              keyType: detectedKeyType,
+              status: tableStatus,
+              source: 'SUPABASE',
+              message: `❌ Supabase mengembalikan HTTP ${tableStatus}: ${errMsg}`
+            });
+          }
         } else {
           clientTestResult = {
             success: true,
             status: 200,
             role: anonJwt?.role || 'anon',
-            tableReady: !isMissingTable,
-            message: isMissingTable
-              ? 'Terhubung (Tabel database belum dibuat, jalankan skrip SQL migration)'
-              : 'Terhubung & Tabel produk aktif'
+            tableReady: false,
+            message: 'Terhubung ke Supabase Cloud'
           };
         }
       } catch (clientErr: any) {

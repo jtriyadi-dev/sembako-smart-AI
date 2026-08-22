@@ -587,7 +587,7 @@ export async function testGeminiApiKey(
   }
 }
 
-export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone?: string; waServerUrl?: string }): Promise<{ success: boolean; message: string; status?: number; source?: string }> {
+export async function testWhatsAppGateway(config: { provider: string; token: string; targetPhone?: string; waServerUrl?: string }): Promise<{ success: boolean; message: string; status?: number; source?: string; serverUrl?: string }> {
   const token = (config.token || '').trim();
   const provider = config.provider || 'wablas';
   const targetPhone = (config.targetPhone || '').trim();
